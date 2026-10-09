@@ -1,14 +1,14 @@
 package a;
 
-import com.googlecode.d2j.DexConstants;
-import com.googlecode.d2j.Field;
-import com.googlecode.d2j.Method;
-import com.googlecode.d2j.Visibility;
-import com.googlecode.d2j.dex.writer.DexFileWriter;
-import com.googlecode.d2j.dex.writer.DexWriteException;
-import com.googlecode.d2j.reader.DexFileReader;
-import com.googlecode.d2j.reader.Op;
-import com.googlecode.d2j.visitors.*;
+import riad.codes.d2j.DexConstants;
+import riad.codes.d2j.Field;
+import riad.codes.d2j.Method;
+import riad.codes.d2j.Visibility;
+import riad.codes.d2j.dex.writer.DexFileWriter;
+import riad.codes.d2j.dex.writer.DexWriteException;
+import riad.codes.d2j.reader.DexFileReader;
+import riad.codes.d2j.reader.Op;
+import riad.codes.d2j.visitors.*;
 
 import org.junit.Test;
 

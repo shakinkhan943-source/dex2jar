@@ -3,7 +3,7 @@ package a;
 import org.junit.Assert;
 import org.junit.Test;
 
-import com.googlecode.d2j.dex.writer.item.ConstPool;
+import riad.codes.d2j.dex.writer.item.ConstPool;
 
 public class CpStringTest {
     @Test

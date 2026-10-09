@@ -124,15 +124,15 @@
     getfield d2j/gen/MI__000/thiz Ljava/lang/Object;
     aload 0
     getfield d2j/gen/MI__000/args [Ljava/lang/Object;
-    invokestatic com/googlecode/d2j/tools/jar/test/res/Res/append_CB002(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;
+    invokestatic riad/codes/d2j/tools/jar/test/res/Res/append_CB002(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;
     areturn
   L1:
     aload 0
     getfield d2j/gen/MI__000/thiz Ljava/lang/Object;
-    checkcast com/googlecode/d2j/tools/jar/test/res/Res
+    checkcast riad/codes/d2j/tools/jar/test/res/Res
     aload 0
     getfield d2j/gen/MI__000/args [Ljava/lang/Object;
-    invokevirtual com/googlecode/d2j/tools/jar/test/res/Res/size_CB004([Ljava/lang/Object;)Ljava/lang/Object;
+    invokevirtual riad/codes/d2j/tools/jar/test/res/Res/size_CB004([Ljava/lang/Object;)Ljava/lang/Object;
     areturn
   L2:
     new java/lang/RuntimeException

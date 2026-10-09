@@ -1,10 +1,10 @@
 package a;
 
-import com.googlecode.d2j.smali.Baksmali;
-import com.googlecode.d2j.smali.BaksmaliDexFileVisitor;
-import com.googlecode.d2j.smali.BaksmaliDumper;
-import com.googlecode.d2j.smali.Smali;
-import com.googlecode.dex2jar.tools.BaseCmd;
+import riad.codes.d2j.smali.Baksmali;
+import riad.codes.d2j.smali.BaksmaliDexFileVisitor;
+import riad.codes.d2j.smali.BaksmaliDumper;
+import riad.codes.d2j.smali.Smali;
+import riad.codes.dex2jar.tools.BaseCmd;
 import org.junit.Test;
 
 import java.io.File;

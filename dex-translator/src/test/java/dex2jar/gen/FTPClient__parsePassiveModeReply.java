@@ -1,18 +1,18 @@
 package dex2jar.gen;
 
-import com.googlecode.d2j.*;
-import com.googlecode.d2j.reader.Op;
-import com.googlecode.d2j.visitors.DexAnnotationVisitor;
-import com.googlecode.d2j.visitors.DexClassVisitor;
-import com.googlecode.d2j.visitors.DexCodeVisitor;
-import com.googlecode.d2j.visitors.DexMethodVisitor;
-import com.googlecode.dex2jar.test.DexTranslatorRunner;
-import com.googlecode.dex2jar.test.TestUtils;
+import riad.codes.d2j.*;
+import riad.codes.d2j.reader.Op;
+import riad.codes.d2j.visitors.DexAnnotationVisitor;
+import riad.codes.d2j.visitors.DexClassVisitor;
+import riad.codes.d2j.visitors.DexCodeVisitor;
+import riad.codes.d2j.visitors.DexMethodVisitor;
+import riad.codes.dex2jar.test.DexTranslatorRunner;
+import riad.codes.dex2jar.test.TestUtils;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.objectweb.asm.Opcodes;
 
-import static com.googlecode.d2j.reader.Op.*;
+import static riad.codes.d2j.reader.Op.*;
 @RunWith(DexTranslatorRunner.class)
 public class FTPClient__parsePassiveModeReply implements Opcodes {
     @Test

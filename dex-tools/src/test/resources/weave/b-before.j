@@ -1,5 +1,5 @@
 .bytecode 50.0
-.class public super com/googlecode/d2j/tools/jar/test/res/Res
+.class public super riad/codes/d2j/tools/jar/test/res/Res
 .super java/util/ArrayList
 
 .method public <init>()V

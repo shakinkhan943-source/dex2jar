@@ -1,5 +1,5 @@
 .bytecode 50.0
-.class public com/googlecode/d2j/tools/jar/test/res/Res
+.class public riad/codes/d2j/tools/jar/test/res/Res
 .super java/util/ArrayList
 
 .method public <init>()V
@@ -13,11 +13,11 @@
 .method public static varargs main([Ljava/lang/String;)V
     getstatic java/lang/System/out Ljava/io/PrintStream;
     ldc ""
-    invokestatic com/googlecode/d2j/tools/jar/test/res/Res/append_A001(Ljava/io/PrintStream;Ljava/lang/CharSequence;)Ljava/io/PrintStream;
+    invokestatic riad/codes/d2j/tools/jar/test/res/Res/append_A001(Ljava/io/PrintStream;Ljava/lang/CharSequence;)Ljava/io/PrintStream;
     pop
     getstatic java/lang/System/out Ljava/io/PrintStream;
     ldc "test"
-    invokestatic com/googlecode/d2j/tools/jar/test/WaveTest/println(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;
+    invokestatic riad/codes/d2j/tools/jar/test/WaveTest/println(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;
     pop
     return
   .limit locals 1
@@ -36,7 +36,7 @@
     aastore
     iconst_0
     invokespecial d2j/gen/MI__000/<init>(Ljava/lang/Object;[Ljava/lang/Object;I)V
-    invokestatic com/googlecode/d2j/tools/jar/test/WaveTest/append(Lp;)Ljava/lang/Object;
+    invokestatic riad/codes/d2j/tools/jar/test/WaveTest/append(Lp;)Ljava/lang/Object;
     checkcast java/io/PrintStream
     areturn
   .limit locals 2
@@ -58,7 +58,7 @@
 
 .method public size()I
     aload 0
-    invokestatic com/googlecode/d2j/tools/jar/test/res/Res/size_A003(Ljava/util/ArrayList;)I
+    invokestatic riad/codes/d2j/tools/jar/test/res/Res/size_A003(Ljava/util/ArrayList;)I
     ireturn
   .limit locals 1
   .limit stack 1
@@ -71,7 +71,7 @@
     aconst_null
     iconst_1
     invokespecial d2j/gen/MI__000/<init>(Ljava/lang/Object;[Ljava/lang/Object;I)V
-    invokestatic com/googlecode/d2j/tools/jar/test/WaveTest/size(Lp;)Ljava/lang/Object;
+    invokestatic riad/codes/d2j/tools/jar/test/WaveTest/size(Lp;)Ljava/lang/Object;
     checkcast java/lang/Number
     invokevirtual java/lang/Number/intValue()I
     ireturn
@@ -91,7 +91,7 @@
 .method public add(Ljava/lang/Object;)Z
     aload 0
     aload 1
-    invokestatic com/googlecode/d2j/tools/jar/test/WaveTest/add(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+    invokestatic riad/codes/d2j/tools/jar/test/WaveTest/add(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
     checkcast java/lang/Boolean
     invokevirtual java/lang/Boolean/booleanValue()Z
     ireturn
