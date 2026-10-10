@@ -48,6 +48,8 @@ tasks.register<JavaExec>("probeKsmaliDexlib") {
     mainClass.set("lab.DexParserProbe")
     args("io.github.shakarover.ksmali:smali-dexlib2")
     systemProperty("lab.parser", "io.github.shakarover.ksmali:smali-dexlib2")
+    // Ksmali 5.x relocates dexlib2 packages under com.android.tools.smali.
+    systemProperty("lab.dexlib.package", "com.android.tools.smali.dexlib2")
 }
 
 tasks.register("printResolvedParserVersions") {
