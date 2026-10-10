@@ -19,9 +19,9 @@ val ksmaliDexlib by configurations.creating {
 }
 
 dependencies {
-    upstreamDexlib("org.smali:dexlib2:2.+")
+    add(upstreamDexlib.name, "org.smali:dexlib2:2.+")
     // Newer community fork; tested independently to avoid duplicate org.jf.dexlib2 classes.
-    ksmaliDexlib("io.github.shakarover.ksmali:smali-dexlib2:5.+")
+    add(ksmaliDexlib.name, "io.github.shakarover.ksmali:smali-dexlib2:5.+")
 }
 
 java {
@@ -36,7 +36,7 @@ tasks.register<JavaExec>("probeUpstreamDexlib") {
     dependsOn(tasks.named("classes"))
     classpath = sourceSets.main.get().runtimeClasspath + upstreamDexlib
     mainClass.set("lab.DexParserProbe")
-    args("org.smali:dexlib2", upstreamDexlib.asPath)
+    args("org.smali:dexlib2")
     systemProperty("lab.parser", "org.smali:dexlib2")
 }
 
@@ -46,7 +46,7 @@ tasks.register<JavaExec>("probeKsmaliDexlib") {
     dependsOn(tasks.named("classes"))
     classpath = sourceSets.main.get().runtimeClasspath + ksmaliDexlib
     mainClass.set("lab.DexParserProbe")
-    args("io.github.shakarover.ksmali:smali-dexlib2", ksmaliDexlib.asPath)
+    args("io.github.shakarover.ksmali:smali-dexlib2")
     systemProperty("lab.parser", "io.github.shakarover.ksmali:smali-dexlib2")
 }
 
