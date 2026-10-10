@@ -2,6 +2,7 @@ description = "Dex Translator"
 
 dependencies {
     implementation(project(":dex-reader"))
+    implementation(project(":dex-reader-api"))
     implementation(project(":dex-ir"))
     implementation(project(":d2j-base-cmd"))
     implementation(libs.asm)

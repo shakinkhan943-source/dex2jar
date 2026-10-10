@@ -56,25 +56,64 @@ public interface DexConstants {
     String ANNOTATION_INNER_CLASS_TYPE = "Ldalvik/annotation/InnerClass;";
     String ANNOTATION_MEMBER_CLASSES_TYPE = "Ldalvik/annotation/MemberClasses;";
 
-    static int toMiniAndroidApiLevel(int dexVersion) {
-        if (dexVersion <= DEX_035 || dexVersion <= DEX_036) {
-            return 0;
-        } else if (dexVersion == DEX_037) {
-            return 24;
-        } else if (dexVersion == DEX_038) {
-            return 26;
-        } else {
-            return 28;
-        }
-    }
+    /**
+     * Recognized DEX versions. Per current Android runtime behavior, 036 is skipped
+     * and 041 is experimental/new container format and should be treated as forward-
+     * compatible but not fully supported for production until verified.
+     */
     int DEX_035 = 0x00303335;
     @Deprecated
     int DEX_036 = 0x00303336;
-    // android 7.0, api 24
     int DEX_037 = 0x00303337;
-    // android 8.0, api 26
     int DEX_038 = 0x00303338;
-    // android 9.0, api 28
     int DEX_039 = 0x00303339;
     int DEX_040 = 0x00303340;
+    int DEX_041 = 0x00303341;
+    int DEX_042 = 0x00303342;
+    int DEX_043 = 0x00303343;
+    int DEX_044 = 0x00303344;
+    int DEX_045 = 0x00303345;
+    int DEX_046 = 0x00303346;
+    int DEX_047 = 0x00303347;
+    int DEX_048 = 0x00303348;
+
+    /** Lowest recognized + supported version (legacy minimum accepted by readers). */
+    int MIN_VERSION = DEX_035;
+
+    /** Highest supported version in this build. Newer versions should be treated
+     * as forward-compatible experimental and may be rejected or logged at read time. */
+    int MAX_SUPPORTED_VERSION = DEX_048;
+
+    /** Current strongly/DC-backed max version whose structure this reader fully maps. */
+    int MAX_KNOWN_VERSION = DEX_040;
+
+    /**
+     * Human-friendly description of the magic/version encoding of DEX files.
+     * The magic is "dex\n039\0" (8 bytes), and the version is encoded as three
+     * decimal digits in the magic bytes.
+     */
+    static String versionMagicDescription() {
+        return "dex\\n039\\0 (8 bytes; version encoded as three decimal digits)";
+    }
+
+    static int toMiniAndroidApiLevel(int dexVersion) {
+        if (dexVersion == DEX_035 || dexVersion == DEX_036) {
+            return 0;
+        }
+        if (dexVersion == DEX_037) {
+            return 24;
+        }
+        if (dexVersion == DEX_038) {
+            return 26;
+        }
+        if (dexVersion == DEX_039) {
+            return 28;
+        }
+        return 28; // 040+ forward-compatible, not guaranteed API level
+    }
+
+    /** Whether this reader treats the given version as in the recognized range. */
+    static boolean isRecognized(int dexVersion) {
+        return MIN_VERSION <= dexVersion && dexVersion <= MAX_SUPPORTED_VERSION;
+    }
 }

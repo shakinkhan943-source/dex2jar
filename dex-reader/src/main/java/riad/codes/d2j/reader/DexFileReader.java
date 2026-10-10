@@ -164,10 +164,11 @@ public class DexFileReader implements BaseDexFileReader {
             throw new DexException("Magic unsupported.");
         }
         int version = in.getInt() >> 8;
-        if (version < DEX_035 || version > DEX_040) {
-            System.err.println("Unknown DEX version. Trying anyway...");
+        if (version < DEX_035 || version > MAX_SUPPORTED_VERSION) {
+            System.err.printf("Unknown DEX version %%08x. Trying anyway...%n", version);
         }
         this.dex_version = version;
+        // N.B. DEX is little-endian after the magic bytes.
         in.order(ByteOrder.LITTLE_ENDIAN);
 
         // skip uint checksum
@@ -587,6 +588,20 @@ public class DexFileReader implements BaseDexFileReader {
         return dex_version;
     }
 
+    /** True if this dex version is one the reader fully maps (vs only experimental). */
+    public final boolean isFullyMapped() {
+        return dex_version <= MAX_KNOWN_VERSION;
+    }
+
+    /**
+     * True if this version is newer than what the reader fully maps. Callers that need
+     * a best-effort read may still proceed; call {@link #isFullyMapped()} first for a
+     * quick readiness check.
+     */
+    public final boolean isExperimental() {
+        return dex_version > MAX_KNOWN_VERSION;
+    }
+
     /**
      * equals to {@link #accept(DexFileVisitor, int)} with 0 as config
      * 
@@ -663,7 +678,7 @@ public class DexFileReader implements BaseDexFileReader {
                 dcv.visitEnd();
             }
         } catch (Exception ex) {
-            DexException dexException = new DexException(ex, "Error process class: [%d]%s", class_idx, className);
+            DexException dexException = new DexException(ex, "Error processing class: [%d]%s", class_idx, className);
             if (0 != (config & IGNORE_READ_EXCEPTION)) {
                 niceExceptionMessage(dexException, 0);
             } else {
@@ -995,8 +1010,7 @@ public class DexFileReader implements BaseDexFileReader {
                 if (annotation_offset != null) {
                     try {
                         read_annotation_set_item(annotation_offset, dfv);
-                    } catch (Exception e) {
-                        throw new DexException(e, "while accept annotation in field:%s.", field.toString());
+                    } catch (Exception e) {                            throw new DexException(e, "while accepting annotation on field: %s", field.toString());
                     }
                 }
             }
@@ -1039,7 +1053,7 @@ public class DexFileReader implements BaseDexFileReader {
                         try {
                             read_annotation_set_item(annotation_offset, dmv);
                         } catch (Exception e) {
-                            throw new DexException(e, "while accept annotation in method:%s.", method.toString());
+                            throw new DexException(e, "while accepting annotation on method: %s", method.toString());
                         }
                     }
                     Integer parameter_annotation_offset = parameterAnnos.get(method_id);
@@ -1047,7 +1061,7 @@ public class DexFileReader implements BaseDexFileReader {
                         try {
                             read_annotation_set_ref_list(parameter_annotation_offset, dmv);
                         } catch (Exception e) {
-                            throw new DexException(e, "while accept parameter annotation in method:%s.",
+                            throw new DexException(e, "while accepting parameter annotation on method: %s",
                                     method.toString());
                         }
                     }
@@ -1063,17 +1077,14 @@ public class DexFileReader implements BaseDexFileReader {
                             try {
                                 acceptCode(code_off, dcv, config, (method_access_flags & DexConstants.ACC_STATIC) != 0,
                                         method);
-                            } catch (Exception e) {
-                                throw new DexException(e, "while accept code in method:[%s] @%08x", method.toString(),
-                                        code_off);
-                            }
+                            } catch (Exception e) {                            throw new DexException(e, "while accepting code for method: %s @%08x", method.toString(), code_off);
+                        }
                         }
                     }
                 }
                 dmv.visitEnd();
             }
-        } catch (Exception e) {
-            throw new DexException(e, "while accept method:[%s]", method.toString());
+        } catch (Exception e) {                            throw new DexException(e, "while accepting method: %s", method.toString());
         }
 
         return method_id;

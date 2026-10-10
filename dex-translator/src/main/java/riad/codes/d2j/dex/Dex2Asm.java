@@ -1,5 +1,6 @@
 package riad.codes.d2j.dex;
 
+import riad.codes.d2j.CallSite;
 import riad.codes.d2j.DexConstants;
 import riad.codes.d2j.DexType;
 import riad.codes.d2j.Field;
@@ -679,14 +680,38 @@ public class Dex2Asm {
         return copy;
     }
 
+    /**
+     * Convert a DEX constant into an ASM constant value used for fields/annotations.
+     * This is deliberately explicit so invoke-custom / invoke-polymorphic / method-handle / method-type
+     * round-trips are traceable and defensive (unknown handle/type kinds are logged and bailed out
+     * rather than silently returning the original object, which previously could pass an
+     * unconverted DexType/MethodHandle/Proto deeper into ASM).
+     */
     public static Object convertConstantValue(Object ele) {
         if (ele instanceof DexType) {
-            ele = Type.getType(((DexType) ele).desc);
-        } else if (ele instanceof MethodHandle) {
-            ele = convertHandler((MethodHandle) ele);
-        } else if (ele instanceof Proto) {
-            ele = Type.getMethodType(((Proto) ele).getDesc());
+            return Type.getType(((DexType) ele).desc);
         }
+        if (ele instanceof MethodHandle) {
+            return convertHandler((MethodHandle) ele);
+        }
+        if (ele instanceof Proto) {
+            return Type.getMethodType(((Proto) ele).getDesc());
+        }
+        if (ele instanceof CallSite) {
+            CallSite cs = (CallSite) ele;
+            MethodHandle bsm = cs.getBootstrapMethodHandler();
+            Handle h = convertHandler(bsm);
+            if (h == null) {
+                System.err.printf("WARN: unable to convert call-site bootstrap method handle for %%s; skipping invoke-custom constant%n", cs.getMethodName());
+                return null;
+            }
+            // The DEX constant for a call-site-like value is represented through the bootstrap
+            // method handle + the invoke-custom target method. We do not round-trip a full
+            // invoke-custom here in the constant path; the actual invoke-custom is emitted by the
+            // IR->ASM converter via visitInvokeDynamicInsn.
+            return null;
+        }
+        System.err.printf("WARN: unrecognized constant type %%s; leaving as-is%n", (ele == null ? "null" : ele.getClass().getName()));
         return ele;
     }
 

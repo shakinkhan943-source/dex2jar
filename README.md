@@ -21,17 +21,18 @@ a local HTTP bridge with real-time progress**.
 | Packages | `com.googlecode.*` | **`riad.codes.*`** |
 | New capability | — | **`d2j-agent`** — HTTP/JSON tool API + coroutines progress streaming |
 | Removed | JDK-internal `sun.security.*` APK signer | self-contained signer (`ApkSign` still works) |
+| **Dex version support** | DEX 035–040 only | DEX **035–048** recognized (041 flagged experimental; `MAX_KNOWN_VERSION` vs `MAX_SUPPORTED_VERSION` split) |
 
 ---
 
 ## Module layout
 
 ```
-dex-reader-api   public reader API (visitors, nodes)
-dex-reader       dex binary parser
+dex-reader-api   public reader API (visitors, nodes, constants)
+dex-reader       dex binary parser (DexFileReader)
 dex-writer       dex binary writer
-dex-ir           intermediate representation + optimizers
-dex-translator   dex -> IR -> ASM class pipeline
+dex-ir           intermediate representation + optimizers (IR AST, SSA, dead-code, etc.)
+dex-translator   dex -> IR -> ASM class pipeline (Dex2jar, Dex2Asm, IR2JConverter)
 dex-tools        command line tools (d2j-dex2jar, d2j-baksmali, ...)
 d2j-smali        smali/baksmali (ANTLR4)
 d2j-jasmin       jasmin assembler/disassembler (ANTLR3)

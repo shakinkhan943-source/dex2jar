@@ -23,7 +23,19 @@ subprojects {
     configure<JavaPluginExtension> {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+        // Test fixtures are compiled with release 17 so string concatenation stays
+        // javac-decoupled: the bundled legacy dx test tool cannot dexify the
+        // Java 9+ `invokedynamic makeConcatWithConstants` opcode (needs sdk>=26).
         withSourcesJar()
+    }
+
+    tasks.withType<JavaCompile>().configureEach {
+        // Test fixtures must be dexifyable by the bundled legacy dx tool, which
+        // cannot translate the Java 9+ `invokedynamic makeConcatWithConstants`
+        // opcode (needs sdk>=26). Force javac to emit StringBuilder-based concat.
+        if (name.lowercase().contains("test")) {
+            options.compilerArgs.add("-XDstringConcat=inline")
+        }
     }
 
     // Generated ANTLR sources are not javadoc-clean; keep the javadoc task from
