@@ -1,0 +1,112 @@
+name: DEX Compatibility Lab
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [modernize/kotlin-agent-bridge]
+    paths:
+      - 'compatibility-lab/**'
+      - '.github/workflows/dex-compatibility-lab.yml'
+      - 'dex-translator/src/test/resources/dexes/**'
+  pull_request:
+    branches: [modernize/kotlin-agent-bridge]
+    paths:
+      - 'compatibility-lab/**'
+      - '.github/workflows/dex-compatibility-lab.yml'
+      - 'dex-translator/src/test/resources/dexes/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dex-compatibility-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parser-matrix:
+    name: Dynamic parser compatibility (isolated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Select DEX fixtures
+        id: fixtures
+        shell: bash
+        run: |
+          mkdir -p compatibility-lab/fixtures compatibility-lab-report
+          if find compatibility-lab/fixtures -type f -name '*.dex' -print -quit | grep -q .; then
+            echo "dir=$GITHUB_WORKSPACE/compatibility-lab/fixtures" >> "$GITHUB_OUTPUT"
+            echo "Using external compatibility-lab/fixtures samples." > compatibility-lab-report/fixture-source.txt
+          else
+            echo "dir=$GITHUB_WORKSPACE/dex-translator/src/test/resources/dexes" >> "$GITHUB_OUTPUT"
+            echo "Using tracked regression fixtures; these are not a complete version corpus." > compatibility-lab-report/fixture-source.txt
+          fi
+          fixture_dir="$(sed -n 's/^dir=//p' "$GITHUB_OUTPUT")"
+          find "$fixture_dir" -type f -name '*.dex' -print | sort > compatibility-lab-report/fixture-list.txt
+      - name: Resolve newest available dynamic parser versions
+        continue-on-error: true
+        run: |
+          set +e
+          ./gradlew --no-daemon -p compatibility-lab --refresh-dependencies printResolvedParserVersions 2>&1 | tee compatibility-lab-report/resolution.txt
+          echo "${PIPESTATUS[0]}" > compatibility-lab-report/resolve.exit
+      - name: Probe newest upstream org.smali dexlib2 2.x
+        continue-on-error: true
+        env:
+          DEX_FIXTURE_DIR: ${{ steps.fixtures.outputs.dir }}
+        run: |
+          set +e
+          ./gradlew --no-daemon -p compatibility-lab --refresh-dependencies probeUpstreamDexlib 2>&1 | tee compatibility-lab-report/upstream-probe.txt
+          echo "${PIPESTATUS[0]}" > compatibility-lab-report/upstream.exit
+      - name: Probe newest ksmali dexlib fork 5.x
+        continue-on-error: true
+        env:
+          DEX_FIXTURE_DIR: ${{ steps.fixtures.outputs.dir }}
+        run: |
+          set +e
+          ./gradlew --no-daemon -p compatibility-lab --refresh-dependencies probeKsmaliDexlib 2>&1 | tee compatibility-lab-report/ksmali-probe.txt
+          echo "${PIPESTATUS[0]}" > compatibility-lab-report/ksmali.exit
+      - name: Build compatibility report
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '# Dynamic DEX Parser Compatibility Report'
+            echo
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- Fixture source: $(cat compatibility-lab-report/fixture-source.txt 2>/dev/null || echo unknown)"
+            echo
+            echo '## Resolved dependency versions'
+            cat compatibility-lab-report/resolution.txt 2>/dev/null || true
+            echo
+            echo '## Fixture inventory'
+            cat compatibility-lab-report/fixture-list.txt 2>/dev/null || true
+            echo
+            echo '## Upstream dexlib2 probe'
+            cat compatibility-lab-report/upstream-probe.txt 2>/dev/null || true
+            echo
+            echo '## Ksmali fork probe'
+            cat compatibility-lab-report/ksmali-probe.txt 2>/dev/null || true
+            echo
+            echo '## Interpretation and limitations'
+            echo '- A PASS means the parser read the fixture and enumerated classes; it does not prove dex2jar translation correctness.'
+            echo '- DEX versions are read from each file magic, not inferred from filenames.'
+            echo '- A DEX 041 result is meaningful only when a valid 041 input/container is present.'
+            echo '- Android documents DEX 041 container support as experimental; do not claim production support from dependency resolution alone.'
+            echo '- This lab is standalone and is not included in the root tools project.'
+          } > compatibility-lab-report/FINAL-REPORT.md
+          cat compatibility-lab-report/FINAL-REPORT.md
+      - name: Upload parser compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-compatibility-lab-report
+          path: compatibility-lab-report/
+          if-no-files-found: warn
+          retention-days: 30
