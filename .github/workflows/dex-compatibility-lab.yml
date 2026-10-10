@@ -102,6 +102,19 @@ jobs:
             echo '- This lab is standalone and is not included in the root tools project.'
           } > compatibility-lab-report/FINAL-REPORT.md
           cat compatibility-lab-report/FINAL-REPORT.md
+      - name: Enforce parser compatibility gates
+        if: always()
+        shell: bash
+        run: |
+          failures=0
+          for result in resolve upstream ksmali; do
+            file="compatibility-lab-report/$result.exit"
+            if [ ! -f "$file" ] || [ "$(cat "$file")" != "0" ]; then
+              echo "FAILED: $result compatibility probe (see report artifact)"
+              failures=1
+            fi
+          done
+          exit "$failures"
       - name: Upload parser compatibility report
         if: always()
         uses: actions/upload-artifact@v4
