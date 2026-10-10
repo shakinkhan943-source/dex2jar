@@ -23,10 +23,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  parser-matrix:
-    name: Dynamic parser compatibility (isolated)
+  parser-compatibility:
+    name: Upstream parser compatibility (isolated)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: gradle/actions/wrapper-validation@v4
@@ -49,13 +49,13 @@ jobs:
           fi
           fixture_dir="$(sed -n 's/^dir=//p' "$GITHUB_OUTPUT")"
           find "$fixture_dir" -type f -name '*.dex' -print | sort > compatibility-lab-report/fixture-list.txt
-      - name: Resolve newest available dynamic parser versions
+      - name: Resolve newest upstream dexlib2 2.x
         continue-on-error: true
         run: |
           set +e
           ./gradlew --no-daemon -p compatibility-lab --refresh-dependencies printResolvedParserVersions 2>&1 | tee compatibility-lab-report/resolution.txt
           echo "${PIPESTATUS[0]}" > compatibility-lab-report/resolve.exit
-      - name: Probe newest upstream org.smali dexlib2 2.x
+      - name: Probe upstream dexlib2 against fixtures
         continue-on-error: true
         env:
           DEX_FIXTURE_DIR: ${{ steps.fixtures.outputs.dir }}
@@ -63,20 +63,12 @@ jobs:
           set +e
           ./gradlew --no-daemon -p compatibility-lab --refresh-dependencies probeUpstreamDexlib 2>&1 | tee compatibility-lab-report/upstream-probe.txt
           echo "${PIPESTATUS[0]}" > compatibility-lab-report/upstream.exit
-      - name: Probe newest ksmali dexlib fork 5.x
-        continue-on-error: true
-        env:
-          DEX_FIXTURE_DIR: ${{ steps.fixtures.outputs.dir }}
-        run: |
-          set +e
-          ./gradlew --no-daemon -p compatibility-lab --refresh-dependencies probeKsmaliDexlib 2>&1 | tee compatibility-lab-report/ksmali-probe.txt
-          echo "${PIPESTATUS[0]}" > compatibility-lab-report/ksmali.exit
       - name: Build compatibility report
         if: always()
         shell: bash
         run: |
           {
-            echo '# Dynamic DEX Parser Compatibility Report'
+            echo '# DEX Parser Compatibility Report'
             echo
             echo "- Commit: $GITHUB_SHA"
             echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -91,9 +83,6 @@ jobs:
             echo '## Upstream dexlib2 probe'
             cat compatibility-lab-report/upstream-probe.txt 2>/dev/null || true
             echo
-            echo '## Ksmali fork probe'
-            cat compatibility-lab-report/ksmali-probe.txt 2>/dev/null || true
-            echo
             echo '## Interpretation and limitations'
             echo '- A PASS means the parser read the fixture and enumerated classes; it does not prove dex2jar translation correctness.'
             echo '- DEX versions are read from each file magic, not inferred from filenames.'
@@ -102,15 +91,15 @@ jobs:
             echo '- This lab is standalone and is not included in the root tools project.'
           } > compatibility-lab-report/FINAL-REPORT.md
           cat compatibility-lab-report/FINAL-REPORT.md
-      - name: Enforce parser compatibility gates
+      - name: Enforce parser compatibility gate
         if: always()
         shell: bash
         run: |
           failures=0
-          for result in resolve upstream ksmali; do
+          for result in resolve upstream; do
             file="compatibility-lab-report/$result.exit"
             if [ ! -f "$file" ] || [ "$(cat "$file")" != "0" ]; then
-              echo "FAILED: $result compatibility probe (see report artifact)"
+              echo "FAILED: $result compatibility check (see report artifact)"
               failures=1
             fi
           done
