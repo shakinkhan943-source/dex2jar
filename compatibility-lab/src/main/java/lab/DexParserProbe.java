@@ -57,7 +57,14 @@ public final class DexParserProbe {
     private static void parseWithInstalledLibrary(File file) throws Exception {
         String packageName = System.getProperty("lab.dexlib.package", "org.jf.dexlib2");
         Class<?> opcodesClass = Class.forName(packageName + ".Opcodes");
-        Object opcodes = opcodesClass.getMethod("getDefault").invoke(null);
+        Object opcodes;
+        try {
+            // Upstream dexlib2 exposes getDefault() as a static method.
+            opcodes = opcodesClass.getMethod("getDefault").invoke(null);
+        } catch (NoSuchMethodException missingDefault) {
+            // Ksmali 5.x exposes forApi(int) instead of the upstream getDefault() API.
+            opcodes = opcodesClass.getMethod("forApi", int.class).invoke(null, 35);
+        }
         Class<?> factoryClass = Class.forName(packageName + ".DexFileFactory");
         Method load = factoryClass.getMethod("loadDexFile", File.class, opcodesClass);
         Object dexFile = load.invoke(null, file, opcodes);
