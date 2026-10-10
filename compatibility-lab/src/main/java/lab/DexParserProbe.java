@@ -55,9 +55,10 @@ public final class DexParserProbe {
     }
 
     private static void parseWithInstalledLibrary(File file) throws Exception {
-        Class<?> opcodesClass = Class.forName("org.jf.dexlib2.Opcodes");
+        String packageName = System.getProperty("lab.dexlib.package", "org.jf.dexlib2");
+        Class<?> opcodesClass = Class.forName(packageName + ".Opcodes");
         Object opcodes = opcodesClass.getMethod("getDefault").invoke(null);
-        Class<?> factoryClass = Class.forName("org.jf.dexlib2.DexFileFactory");
+        Class<?> factoryClass = Class.forName(packageName + ".DexFileFactory");
         Method load = factoryClass.getMethod("loadDexFile", File.class, opcodesClass);
         Object dexFile = load.invoke(null, file, opcodes);
         if (dexFile == null) throw new IllegalStateException("Parser returned null");
