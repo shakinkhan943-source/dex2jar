@@ -71,7 +71,7 @@ public final class DexParserProbe {
     private static String readVersion(Path file) {
         try {
             byte[] bytes = Files.readAllBytes(file);
-            if (bytes.length < 8 || bytes[0] != 'd' || bytes[1] != 'e' || bytes[2] != 'x' || bytes[3] != '\\n') return "INVALID_MAGIC";
+            if (bytes.length < 8 || bytes[0] != 'd' || bytes[1] != 'e' || bytes[2] != 'x' || bytes[3] != '\n') return "INVALID_MAGIC";
             return new String(bytes, 4, 3, java.nio.charset.StandardCharsets.US_ASCII);
         } catch (IOException e) {
             return "UNREADABLE";
