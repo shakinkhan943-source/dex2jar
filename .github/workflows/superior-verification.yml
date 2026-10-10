@@ -1,0 +1,224 @@
+name: Superior Engine Verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [modernize/kotlin-agent-bridge]
+  pull_request:
+    branches: [modernize/kotlin-agent-bridge]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: superior-verification
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FIXTURE_DIR: verification/fixtures
+      REPORT_DIR: verification-report
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Initialize report
+        run: |
+          mkdir -p "$REPORT_DIR"
+          {
+            echo "# dex2jar Verification Report"
+            echo
+            echo "- Repository: $GITHUB_REPOSITORY"
+            echo "- Ref: $GITHUB_REF_NAME"
+            echo "- Commit: $(git rev-parse HEAD)"
+            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "- Java:"
+            java -version 2>&1 | sed 's/^/  /'
+          } > "$REPORT_DIR/FINAL-REPORT.md"
+          ./gradlew --version > "$REPORT_DIR/gradle-version.txt" 2>&1
+
+      - name: Clean full regression suite
+        continue-on-error: true
+        run: |
+          set +e
+          ./gradlew --no-daemon --stacktrace clean test
+          echo "$?" > "$REPORT_DIR/gradle-test.exit"
+          exit 0
+
+      - name: Build modules and CLI/agent distributions
+        continue-on-error: true
+        run: |
+          set +e
+          ./gradlew --no-daemon --stacktrace assemble :dex-tools:distZip :d2j-agent:distZip
+          echo "$?" > "$REPORT_DIR/build.exit"
+          exit 0
+
+      - name: CLI launcher smoke test
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p /tmp/d2j-cli
+          zipfile=$(find dex-tools/build/distributions -maxdepth 1 -name '*.zip' -print -quit)
+          if [ -z "$zipfile" ]; then
+            echo "No CLI distribution ZIP found" > "$REPORT_DIR/cli-smoke.txt"
+            echo 1 > "$REPORT_DIR/cli.exit"
+            exit 0
+          fi
+          unzip -q "$zipfile" -d /tmp/d2j-cli
+          launcher=$(find /tmp/d2j-cli -name 'd2j-dex2jar.sh' -print -quit)
+          if [ -z "$launcher" ]; then
+            echo "CLI launcher missing" > "$REPORT_DIR/cli-smoke.txt"
+            echo 1 > "$REPORT_DIR/cli.exit"
+            exit 0
+          fi
+          sh "$launcher" --help > "$REPORT_DIR/cli-smoke.txt" 2>&1
+          echo "$?" > "$REPORT_DIR/cli.exit"
+          exit 0
+
+      - name: Convert real fixtures and inspect generated JARs
+        continue-on-error: true
+        run: |
+          mkdir -p "$REPORT_DIR/sample-jars"
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, subprocess, time, zipfile, tempfile
+          root = pathlib.Path(os.environ["FIXTURE_DIR"])
+          report = pathlib.Path(os.environ["REPORT_DIR"])
+          fixtures = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in (".dex", ".apk", ".zip")) if root.exists() else []
+          zips = list(pathlib.Path("dex-tools/build/distributions").glob("*.zip"))
+          launcher = None
+          if zips:
+              tmp = pathlib.Path(tempfile.mkdtemp(prefix="d2j-dist-"))
+              try:
+                  with zipfile.ZipFile(zips[0]) as z: z.extractall(tmp)
+                  found = list(tmp.rglob("d2j-dex2jar.sh"))
+                  if found: launcher = found[0]
+              except Exception: pass
+          def headers(path):
+              try:
+                  if path.suffix.lower() == ".dex":
+                      entries = [(path.name, path.read_bytes()[:8])]
+                  else:
+                      with zipfile.ZipFile(path) as z:
+                          entries = [(n, z.read(n)[:8]) for n in z.namelist()
+                            if re.fullmatch(r"classes(?:[2-9][0-9]*)?\.dex", pathlib.PurePosixPath(n).name)]
+                  out = []
+                  for name, h in entries:
+                      m = re.match(rb"dex\n(\d{3})\x00", h)
+                      out.append({"entry": name, "version": m.group(1).decode() if m else "INVALID_MAGIC"})
+                  return out
+              except Exception as e: return [{"entry":"READ_ERROR","version":str(e)}]
+          rows = []
+          for p in fixtures:
+              row = {"file":str(p), "size_bytes":p.stat().st_size, "sha256":hashlib.sha256(p.read_bytes()).hexdigest(),
+                     "dex_entries":headers(p), "conversion":"NOT_RUN", "jar_validation":"NOT_RUN",
+                     "output_bytes":0, "duration_seconds":None, "class_count":0, "details":""}
+              out = report / "sample-jars" / (p.stem + ".jar")
+              if not row["dex_entries"] or any(x["version"] == "INVALID_MAGIC" or x["entry"] == "READ_ERROR" for x in row["dex_entries"]):
+                  row["conversion"], row["details"] = "FAIL", "Invalid/missing DEX header or unreadable fixture"
+              elif not launcher:
+                  row["conversion"], row["details"] = "BLOCKED", "CLI launcher unavailable"
+              else:
+                  start = time.monotonic()
+                  try:
+                      proc = subprocess.run(["sh",str(launcher),"-f","-o",str(out),str(p)],
+                        stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=240)
+                      row["duration_seconds"] = round(time.monotonic()-start,3)
+                      row["details"] = proc.stdout[-4000:]
+                      if proc.returncode == 0 and out.exists() and out.stat().st_size:
+                          row["conversion"], row["output_bytes"] = "PASS", out.stat().st_size
+                          try:
+                              with zipfile.ZipFile(out) as jar:
+                                  classes = [n for n in jar.namelist() if n.endswith(".class")]
+                                  invalid = [n for n in classes if len(jar.read(n)) < 8 or jar.read(n)[:4] != b"\xca\xfe\xba\xbe"]
+                                  if classes and not invalid and jar.testzip() is None:
+                                      row["jar_validation"], row["class_count"] = "PASS", len(classes)
+                                  else: row["jar_validation"] = "FAIL"
+                          except Exception as e:
+                              row["jar_validation"], row["details"] = "FAIL", row["details"] + "\nJAR check: " + repr(e)
+                      else: row["conversion"] = "FAIL"
+                  except Exception as e: row["conversion"], row["details"] = "FAIL", repr(e)
+              rows.append(row)
+          (report / "real-samples.json").write_text(json.dumps(rows,indent=2))
+          passed = sum(r["conversion"] == "PASS" and r["jar_validation"] == "PASS" for r in rows)
+          with (report / "FINAL-REPORT.md").open("a") as f:
+              f.write("\n## Real-input conversion gate\n\n")
+              f.write("Put legally redistributable DEX/APK fixtures in verification/fixtures/. ZIP integrity and class magic checks are structural checks, not full JVM verification.\n\n")
+              f.write("| Fixture | Input bytes | SHA-256 | DEX versions | Conversion | JAR check | Classes | Output bytes | Seconds |\n|---|---:|---|---|---|---|---:|---:|---:|\n")
+              for r in rows:
+                  vs = ", ".join(x["version"] for x in r["dex_entries"]) or "none"
+                  f.write("| {} | {} | {} | {} | {} | {} | {} | {} | {} |\n".format(r["file"],r["size_bytes"],r["sha256"],vs,r["conversion"],r["jar_validation"],r["class_count"],r["output_bytes"],r["duration_seconds"]))
+              f.write("\nFixtures discovered: {}\nPassing real conversions with structural JAR validation: {}\n".format(len(rows),passed))
+              f.write("Observed DEX versions: " + (", ".join(sorted({x["version"] for r in rows for x in r["dex_entries"]})) or "none") + "\n")
+              f.write("Real-input gate: " + ("PASS (at least two fixture files passed; confirm independence manually)" if passed >= 2 else "BLOCKED (fewer than two fixtures passed)") + "\n")
+          (report / "samples.exit").write_text("0" if passed >= 2 else "1")
+          print("Fixtures:",len(rows),"passing:",passed)
+          PY
+
+      - name: Calculate readiness level and final report
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, xml.etree.ElementTree as ET
+          d = pathlib.Path(os.environ["REPORT_DIR"])
+          p = d / "FINAL-REPORT.md"
+          def code(n):
+              try: return int((d/n).read_text().strip())
+              except Exception: return 999
+          tc,bc,cc,sc = (code("gradle-test.exit"),code("build.exit"),code("cli.exit"),code("samples.exit"))
+          t = {"tests":0,"failures":0,"errors":0,"skipped":0,"suites":0}
+          for x in pathlib.Path(".").glob("**/build/test-results/test/TEST-*.xml"):
+              try:
+                  r=ET.parse(x).getroot(); t["suites"]+=1
+                  for k in ("tests","failures","errors","skipped"): t[k]+=int(r.attrib.get(k,0))
+              except Exception: pass
+          try: rows=json.loads((d/"real-samples.json").read_text())
+          except Exception: rows=[]
+          passed=sum(r.get("conversion")=="PASS" and r.get("jar_validation")=="PASS" for r in rows)
+          if tc==0 and bc==0 and cc==0 and passed>=2: stage,level="CANDIDATE — automated gates passed; human review remains","4/5"
+          elif tc==0 and bc==0 and cc==0: stage,level="TESTED BUILD — real-input gate blocked","3/5"
+          else: stage,level="NOT READY — a build, test, or CLI gate failed/missing","1–2/5"
+          with p.open("a") as f:
+              f.write("\n## Readiness assessment\n\nStage: **{}**\n\nEngineering maturity level: **{}**\n\n".format(stage,level))
+              f.write("Gradle test exit: {}; build exit: {}; CLI smoke exit: {}; real-input exit: {}.\n\n".format(tc,bc,cc,sc))
+              f.write("JUnit XML totals: {} tests, {} failures, {} errors, {} skipped, {} suites.\n\n".format(t["tests"],t["failures"],t["errors"],t["skipped"],t["suites"]))
+              f.write("This is engineering readiness, not an AI/model training score. Class magic and ZIP checks are not full bytecode verification. Version coverage is only proven for versions present in converted fixtures. Peak RSS, semantic equivalence, all opcode combinations, security review, and DrApk runtime integration require separate evidence.\n")
+          pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(p.read_text())
+          print(p.read_text())
+          PY
+
+      - name: Upload report and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex2jar-verification-report
+          path: |
+            verification-report/
+            **/build/test-results/test/
+            **/build/reports/tests/test/
+            dex-tools/build/distributions/
+            d2j-agent/build/distributions/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce release gates
+        if: always()
+        run: |
+          failed=0
+          for f in gradle-test.exit build.exit cli.exit samples.exit; do
+            if [ ! -f "$REPORT_DIR/$f" ] || [ "$(cat "$REPORT_DIR/$f")" != "0" ]; then
+              echo "::error::$f failed or missing"
+              failed=1
+            fi
+          done
+          exit "$failed"
