@@ -95,6 +95,14 @@ jobs:
           root = pathlib.Path(os.environ["FIXTURE_DIR"])
           report = pathlib.Path(os.environ["REPORT_DIR"])
           fixtures = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in (".dex", ".apk", ".zip")) if root.exists() else []
+          fixture_sources = {str(p): "external" for p in fixtures}
+          # If no user-provided samples exist, exercise tracked regression DEX files.
+          # These prove the CLI can convert known fixtures, but do NOT count as
+          # independent real-world samples for the higher maturity rating.
+          if not fixtures:
+              regression_dir = pathlib.Path("dex-translator/src/test/resources/dexes")
+              fixtures = sorted(p for p in regression_dir.glob("*.dex") if p.is_file()) if regression_dir.exists() else []
+              fixture_sources = {str(p): "built-in-regression" for p in fixtures}
           zips = list(pathlib.Path("dex-tools/build/distributions").glob("*.zip"))
           launcher = None
           if zips:
@@ -120,7 +128,7 @@ jobs:
               except Exception as e: return [{"entry":"READ_ERROR","version":str(e)}]
           rows = []
           for p in fixtures:
-              row = {"file":str(p), "size_bytes":p.stat().st_size, "sha256":hashlib.sha256(p.read_bytes()).hexdigest(),
+              row = {"file":str(p), "source":fixture_sources.get(str(p), "external"), "size_bytes":p.stat().st_size, "sha256":hashlib.sha256(p.read_bytes()).hexdigest(),
                      "dex_entries":headers(p), "conversion":"NOT_RUN", "jar_validation":"NOT_RUN",
                      "output_bytes":0, "duration_seconds":None, "class_count":0, "details":""}
               out = report / "sample-jars" / (p.stem + ".jar")
@@ -153,12 +161,13 @@ jobs:
           passed = sum(r["conversion"] == "PASS" and r["jar_validation"] == "PASS" for r in rows)
           with (report / "FINAL-REPORT.md").open("a") as f:
               f.write("\n## Real-input conversion gate\n\n")
-              f.write("Put legally redistributable DEX/APK fixtures in verification/fixtures/. ZIP integrity and class magic checks are structural checks, not full JVM verification.\n\n")
-              f.write("| Fixture | Input bytes | SHA-256 | DEX versions | Conversion | JAR check | Classes | Output bytes | Seconds |\n|---|---:|---|---|---|---|---:|---:|---:|\n")
+              f.write("User-provided, legally redistributable DEX/APK fixtures belong in verification/fixtures/. If none exist, tracked DEX regression fixtures are tested automatically; these are not independent real-world samples. ZIP integrity and class magic checks are structural checks, not full JVM verification.\n\n")
+              f.write("| Fixture | Source | Input bytes | SHA-256 | DEX versions | Conversion | JAR check | Classes | Output bytes | Seconds |\n|---|---|---:|---|---|---|---|---:|---:|---:|\n")
               for r in rows:
                   vs = ", ".join(x["version"] for x in r["dex_entries"]) or "none"
-                  f.write("| {} | {} | {} | {} | {} | {} | {} | {} | {} |\n".format(r["file"],r["size_bytes"],r["sha256"],vs,r["conversion"],r["jar_validation"],r["class_count"],r["output_bytes"],r["duration_seconds"]))
-              f.write("\nFixtures discovered: {}\nPassing real conversions with structural JAR validation: {}\n".format(len(rows),passed))
+                  f.write("| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n".format(r["file"],r["source"],r["size_bytes"],r["sha256"],vs,r["conversion"],r["jar_validation"],r["class_count"],r["output_bytes"],r["duration_seconds"]))
+              external_passed = sum(r["source"] == "external" and r["conversion"] == "PASS" and r["jar_validation"] == "PASS" for r in rows)
+              f.write("\nFixtures discovered: {}\nPassing conversions with structural JAR validation: {}\nPassing user-provided fixtures: {}\n".format(len(rows),passed,external_passed))
               f.write("Observed DEX versions: " + (", ".join(sorted({x["version"] for r in rows for x in r["dex_entries"]})) or "none") + "\n")
               f.write("Real-input gate: " + ("PASS (at least two fixture files passed; confirm independence manually)" if passed >= 2 else "BLOCKED (fewer than two fixtures passed)") + "\n")
           (report / "samples.exit").write_text("0" if passed >= 2 else "1")
@@ -185,14 +194,16 @@ jobs:
           try: rows=json.loads((d/"real-samples.json").read_text())
           except Exception: rows=[]
           passed=sum(r.get("conversion")=="PASS" and r.get("jar_validation")=="PASS" for r in rows)
-          if tc==0 and bc==0 and cc==0 and passed>=2: stage,level="CANDIDATE — automated gates passed; human review remains","4/5"
-          elif tc==0 and bc==0 and cc==0: stage,level="TESTED BUILD — real-input gate blocked","3/5"
+          external_passed=sum(r.get("source")=="external" and r.get("conversion")=="PASS" and r.get("jar_validation")=="PASS" for r in rows)
+          if tc==0 and bc==0 and cc==0 and passed>=2 and external_passed>=2: stage,level="CANDIDATE — automated gates passed; human review remains","4/5"
+          elif tc==0 and bc==0 and cc==0 and passed>=2: stage,level="TESTED BUILD — regression fixtures pass; independent real-world samples pending","3/5"
+          elif tc==0 and bc==0 and cc==0: stage,level="TESTED BUILD — conversion fixture gate blocked","3/5"
           else: stage,level="NOT READY — a build, test, or CLI gate failed/missing","1–2/5"
           with p.open("a") as f:
               f.write("\n## Readiness assessment\n\nStage: **{}**\n\nEngineering maturity level: **{}**\n\n".format(stage,level))
               f.write("Gradle test exit: {}; build exit: {}; CLI smoke exit: {}; real-input exit: {}.\n\n".format(tc,bc,cc,sc))
               f.write("JUnit XML totals: {} tests, {} failures, {} errors, {} skipped, {} suites.\n\n".format(t["tests"],t["failures"],t["errors"],t["skipped"],t["suites"]))
-              f.write("This is engineering readiness, not an AI/model training score. Class magic and ZIP checks are not full bytecode verification. Version coverage is only proven for versions present in converted fixtures. Peak RSS, semantic equivalence, all opcode combinations, security review, and DrApk runtime integration require separate evidence.\n")
+              f.write("This is engineering readiness, not an AI/model training score. Built-in regression fixtures do not substitute for independent real-world samples. Class magic and ZIP checks are not full bytecode verification. Version coverage is only proven for versions present in converted fixtures. Peak RSS, semantic equivalence, all opcode combinations, security review, and DrApk runtime integration require separate evidence.\n")
           pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(p.read_text())
           print(p.read_text())
           PY
