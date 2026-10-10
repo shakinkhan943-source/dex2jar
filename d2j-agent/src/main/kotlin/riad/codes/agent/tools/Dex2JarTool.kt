@@ -1,10 +1,7 @@
 package riad.codes.agent.tools
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import riad.codes.agent.AgentTool
 import riad.codes.agent.ProgressReporter
@@ -12,9 +9,11 @@ import riad.codes.agent.ToolArguments
 import riad.codes.agent.ToolParameter
 import riad.codes.agent.ToolResult
 import riad.codes.agent.ToolSpec
-import riad.codes.d2j.dex.BaseDexExceptionHandler
-import riad.codes.d2j.dex.Dex2jar
-import riad.codes.d2j.reader.MultiDexFileReader
+import riad.codes.d2j.engine.Cancellation
+import riad.codes.d2j.engine.ConversionOptions
+import riad.codes.d2j.engine.DexEngine
+import riad.codes.d2j.engine.EnginePhase
+import riad.codes.d2j.engine.ProgressListener
 import java.io.File
 import java.nio.file.Files
 import java.util.zip.ZipFile
@@ -22,9 +21,10 @@ import java.util.zip.ZipFile
 /**
  * Convert a `.dex` or `.apk` into a `.jar` of Java class files.
  *
- * Progress is streamed while the conversion runs: a heartbeat keeps the agent
- * informed, and every generated class is announced as the output archive is
- * enumerated.
+ * The conversion runs through the modern [DexEngine], so the agent gets the
+ * engine's guarantees for free: atomic publish (a failed run never corrupts an
+ * existing jar), input limits, output validation, per-class progress, and
+ * cooperative cancellation when the job's coroutine is cancelled.
  */
 class Dex2JarTool : AgentTool {
 
@@ -58,42 +58,37 @@ class Dex2JarTool : AgentTool {
                 mapOf("input" to input.path, "output" to output.path),
             )
 
-            val reader = MultiDexFileReader.open(Files.readAllBytes(input.toPath()))
-            val handler = BaseDexExceptionHandler()
-
-            coroutineScope {
-                val heartbeat = launch {
-                    var tick = 0
-                    while (isActive) {
-                        delay(500)
-                        tick++
-                        reporter.progress("converting… (${tick * 500} ms)")
-                    }
+            val bytes = Files.readAllBytes(input.toPath())
+            val job: Job? = coroutineContext[Job]
+            val listener = object : ProgressListener {
+                override fun onPhase(phase: EnginePhase, detail: String) {
+                    reporter.progress("${phase.name.lowercase()}: $detail")
                 }
-                try {
-                    Files.deleteIfExists(output.toPath())
-                    Dex2jar.from(reader)
-                        .withExceptionHandler(handler)
-                        .reUseReg(reuseReg)
-                        .topoLogicalSort()
-                        .skipDebug(!debugInfo)
-                        .skipExceptions(skipExceptions)
-                        .to(output.toPath())
-                } finally {
-                    heartbeat.cancel()
+
+                override fun onClass(className: String, index: Int, total: Int) {
+                    reporter.item(className, index + 1, total)
                 }
             }
+            val options = ConversionOptions(
+                reuseReg = reuseReg,
+                debugInfo = debugInfo,
+                skipExceptions = skipExceptions,
+                listener = listener,
+                cancellation = Cancellation.Token { job?.isActive == false },
+            )
+
+            val report = DexEngine.convert(bytes, output.toPath(), options)
 
             val classes = listClasses(output)
-            classes.forEachIndexed { i, name ->
-                reporter.item(name, i + 1, classes.size)
-            }
-
             val payload = mapOf(
                 "input" to input.path,
                 "output" to output.path,
                 "outputSize" to output.length(),
                 "classCount" to classes.size,
+                "dexVersion" to report.dexVersion,
+                "dexEntryNames" to report.dexEntryNames,
+                "duplicateClasses" to report.duplicateClasses,
+                "warnings" to report.warnings,
             )
             reporter.completed("wrote ${classes.size} classes to ${output.name}", payload)
             ToolResult(

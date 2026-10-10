@@ -17,9 +17,9 @@
 package riad.codes.dex2jar.tools;
 
 import riad.codes.d2j.dex.Dex2jar;
-import riad.codes.d2j.reader.BaseDexFileReader;
+import riad.codes.d2j.engine.ConversionOptions;
+import riad.codes.d2j.engine.DexEngine;
 import riad.codes.d2j.reader.DexFileReader;
-import riad.codes.d2j.reader.MultiDexFileReader;
 import riad.codes.dex2jar.ir.ET;
 
 import java.io.File;
@@ -105,20 +105,31 @@ public class Dex2jarCmd extends BaseCmd {
             Path file = output == null ? currentDir.resolve(baseName + "-dex2jar.jar") : output;
             System.err.println("dex2jar " + fileName + " -> " + file);
 
-            BaseDexFileReader reader = MultiDexFileReader.open(Files.readAllBytes(new File(fileName).toPath()));
-            BaksmaliBaseDexExceptionHandler handler = notHandleException ? null : new BaksmaliBaseDexExceptionHandler();
-            Dex2jar.from(reader).withExceptionHandler(handler).reUseReg(reuseReg).topoLogicalSort()
-                    .skipDebug(!debugInfo).optimizeSynchronized(this.optmizeSynchronized).printIR(printIR)
-                    .noCode(noCode).skipExceptions(skipExceptions).to(file);
-
-            if (!notHandleException) {
-                if (handler.hasException()) {
-                    Path errorFile = exceptionFile == null ? currentDir.resolve(baseName + "-error.zip")
-                            : exceptionFile;
-                    System.err.println("Detail Error Information in File " + errorFile);
-                    System.err.println(BaksmaliBaseDexExceptionHandler.REPORT_MESSAGE);
-                    handler.dump(errorFile, originalArgs);
+            byte[] data = Files.readAllBytes(new File(fileName).toPath());
+            BaksmaliBaseDexExceptionHandler handler =
+                    notHandleException ? null : new BaksmaliBaseDexExceptionHandler();
+            // Route through the modern engine (atomic publish, input limits, output
+            // validation). Recoverable translate errors are still forwarded to the
+            // Baksmali handler so the -error.zip dump behavior is preserved.
+            ConversionOptions options = ConversionOptions.cli(
+                    reuseReg, debugInfo, this.optmizeSynchronized, printIR, noCode, skipExceptions,
+                    false, handler);
+            try {
+                DexEngine.INSTANCE.convert(data, file, options);
+            } catch (RuntimeException e) {
+                if (notHandleException) {
+                    throw e;
                 }
+                handler.handleFileException(e);
+                System.err.println("dex2jar failed: " + e.getMessage());
+            }
+
+            if (!notHandleException && handler.hasException()) {
+                Path errorFile = exceptionFile == null ? currentDir.resolve(baseName + "-error.zip")
+                        : exceptionFile;
+                System.err.println("Detail Error Information in File " + errorFile);
+                System.err.println(BaksmaliBaseDexExceptionHandler.REPORT_MESSAGE);
+                handler.dump(errorFile, originalArgs);
             }
             // long endTS = System.currentTimeMillis();
             // System.err.println(String.format("%.2f", (float) (endTS - baseTS) / 1000));

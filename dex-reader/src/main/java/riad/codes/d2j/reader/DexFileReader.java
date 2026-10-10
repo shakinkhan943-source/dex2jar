@@ -142,6 +142,10 @@ public class DexFileReader implements BaseDexFileReader {
     final int call_site_ids_size;
     final int method_handle_ids_size;
     final int dex_version;
+    /** DEX 041: total physical size of the container (0 for pre-041 files). */
+    final int container_size;
+    /** DEX 041: this logical DEX's offset within the container (0 for standalone / pre-041). */
+    final int header_offset;
 
     /**
      * read dex from a {@link ByteBuffer}.
@@ -164,18 +168,20 @@ public class DexFileReader implements BaseDexFileReader {
             throw new DexException("Magic unsupported.");
         }
         int version = in.getInt() >> 8;
-        if (version < DEX_035 || version > MAX_SUPPORTED_VERSION) {
-            System.err.printf("Unknown DEX version %%08x. Trying anyway...%n", version);
+        if (!DexConstants.isSupported(version)) {
+            throw new DexException(
+                    "Unsupported DEX version %08x: supported versions are 035 and 037-041 "
+                            + "(version 036 was never shipped and is rejected by ART).",
+                    version);
         }
         this.dex_version = version;
         // N.B. DEX is little-endian after the magic bytes.
         in.order(ByteOrder.LITTLE_ENDIAN);
 
-        // skip uint checksum
-        // and 20 bytes signature
-        // and uint file_size
-        // and uint header_size 0x70
-        skip(in, 4 + 20 + 4 + 4);
+        // uint checksum (4) + 20-byte signature, then file_size and header_size.
+        skip(in, 4 + 20);
+        int fileSize = in.getInt();
+        int headerSize = in.getInt();
 
         int endian_tag = in.getInt();
         if (endian_tag != ENDIAN_CONSTANT) {
@@ -201,6 +207,38 @@ public class DexFileReader implements BaseDexFileReader {
         class_defs_size = in.getInt();
         int class_defs_off = in.getInt();
         // skip uint data_size data_off
+
+        // DEX 041 (Android 15+) extends the header from 0x70 to 0x78 bytes with
+        // two little-endian uints: container_size (0x70) and header_offset (0x74).
+        // All offsets are container-relative; for a standalone file (the layout
+        // inside an APK's classes*.dex) header_offset == 0, so container-relative
+        // offsets equal file-relative offsets and the sections below are parsed
+        // unchanged. A nonzero header_offset means the caller handed us a slice of
+        // a multi-entry container, which we cannot remap safely -> reject.
+        int containerSize = 0;
+        int headerOffset = 0;
+        if (dex_version == DEX_041 && headerSize == 0x78) {
+            if (in.limit() < 0x78) {
+                throw new DexException(
+                        "Truncated DEX 041 header: %d bytes available, need at least 0x78.", in.limit());
+            }
+            in.position(0x70);
+            containerSize = in.getInt();
+            headerOffset = in.getInt();
+            if (headerOffset != 0) {
+                throw new DexException(
+                        "DEX 041 container entry at header_offset=0x%08x is not supported: this reader "
+                                + "expects a standalone DEX file (header_offset == 0); extract the individual "
+                                + "DEX entry from the container first.",
+                        headerOffset);
+            }
+            if (containerSize < fileSize) {
+                throw new DexException(
+                        "Invalid DEX 041 header: container_size(%d) < file_size(%d).", containerSize, fileSize);
+            }
+        }
+        this.container_size = containerSize;
+        this.header_offset = headerOffset;
 
         int call_site_ids_off = 0;
         int call_site_ids_size = 0;
@@ -586,6 +624,16 @@ public class DexFileReader implements BaseDexFileReader {
     @Override
     public int getDexVersion() {
         return dex_version;
+    }
+
+    /** DEX 041 container size (0 for pre-041 files or standalone DEX files). */
+    public int getContainerSize() {
+        return container_size;
+    }
+
+    /** DEX 041 header offset within its container (always 0 for files this reader accepts). */
+    public int getHeaderOffset() {
+        return header_offset;
     }
 
     /** True if this dex version is one the reader fully maps (vs only experimental). */

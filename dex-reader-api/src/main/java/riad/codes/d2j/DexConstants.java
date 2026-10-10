@@ -57,9 +57,15 @@ public interface DexConstants {
     String ANNOTATION_MEMBER_CLASSES_TYPE = "Ldalvik/annotation/MemberClasses;";
 
     /**
-     * Recognized DEX versions. Per current Android runtime behavior, 036 is skipped
-     * and 041 is experimental/new container format and should be treated as forward-
-     * compatible but not fully supported for production until verified.
+     * Recognized DEX versions. Per ART's standard_dex_file.cc: 036 was skipped
+     * (Dalvik bug); valid versions are 035 and 037-041. DEX 041 (Android V/15+)
+     * extends the header from 0x70 to 0x78 bytes with two little-endian uints -
+     * container_size (total physical container size) and header_offset (this
+     * logical DEX's offset in the container) - and makes all header/offset fields
+     * relative to the physical container start. For a standalone .dex (the layout
+     * found in an APK's classes*.dex) header_offset is 0, so container-relative
+     * offsets equal file-relative offsets and this reader parses them directly.
+     * There is no DEX 042+ in ART today.
      */
     int DEX_035 = 0x00303335;
     @Deprecated
@@ -67,25 +73,26 @@ public interface DexConstants {
     int DEX_037 = 0x00303337;
     int DEX_038 = 0x00303338;
     int DEX_039 = 0x00303339;
-    int DEX_040 = 0x00303340;
-    int DEX_041 = 0x00303341;
-    int DEX_042 = 0x00303342;
-    int DEX_043 = 0x00303343;
-    int DEX_044 = 0x00303344;
-    int DEX_045 = 0x00303345;
-    int DEX_046 = 0x00303346;
-    int DEX_047 = 0x00303347;
-    int DEX_048 = 0x00303348;
+    int DEX_040 = 0x00303430;
+    int DEX_041 = 0x00303431;
 
     /** Lowest recognized + supported version (legacy minimum accepted by readers). */
     int MIN_VERSION = DEX_035;
 
-    /** Highest supported version in this build. Newer versions should be treated
-     * as forward-compatible experimental and may be rejected or logged at read time. */
-    int MAX_SUPPORTED_VERSION = DEX_048;
+    /**
+     * Highest DEX version whose format this reader implements. Standard 0x70
+     * layouts through 040, plus the 0x78-header DEX 041 container layout for
+     * standalone (header_offset == 0) files. This value is a little-endian int
+     * as stored in the magic word (e.g. '0x00303431' = "041").
+     */
+    int MAX_SUPPORTED_VERSION = DEX_041;
 
-    /** Current strongly/DC-backed max version whose structure this reader fully maps. */
-    int MAX_KNOWN_VERSION = DEX_040;
+    /** Highest version known to this build at all (may exceed MAX_SUPPORTED). */
+    int MAX_RECOGNIZED_VERSION = DEX_041;
+
+    /** Kept for compatibility with older callers; identical to [MAX_SUPPORTED_VERSION]. */
+    @Deprecated
+    int MAX_KNOWN_VERSION = MAX_SUPPORTED_VERSION;
 
     /**
      * Human-friendly description of the magic/version encoding of DEX files.
@@ -109,11 +116,21 @@ public interface DexConstants {
         if (dexVersion == DEX_039) {
             return 28;
         }
-        return 28; // 040+ forward-compatible, not guaranteed API level
+        if (dexVersion == DEX_041) {
+            return 35; // Android 15
+        }
+        return 29; // 040 = Android 10 (API 29)
     }
 
     /** Whether this reader treats the given version as in the recognized range. */
     static boolean isRecognized(int dexVersion) {
-        return MIN_VERSION <= dexVersion && dexVersion <= MAX_SUPPORTED_VERSION;
+        return dexVersion == DEX_036 || (MIN_VERSION <= dexVersion && dexVersion <= MAX_RECOGNIZED_VERSION);
+    }
+
+    /**
+     * Formats this build can actually parse and convert: 035 and 037-041.
+     */
+    static boolean isSupported(int dexVersion) {
+        return dexVersion == DEX_035 || (DEX_037 <= dexVersion && dexVersion <= MAX_SUPPORTED_VERSION);
     }
 }

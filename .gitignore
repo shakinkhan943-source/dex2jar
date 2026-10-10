@@ -6,6 +6,9 @@ build/
 # Kotlin
 .kotlin/
 
+# Test / tool output (asmifier zips, per-run reports)
+target/
+
 # IDE
 .idea/
 *.iml

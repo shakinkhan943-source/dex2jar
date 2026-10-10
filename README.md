@@ -21,7 +21,7 @@ a local HTTP bridge with real-time progress**.
 | Packages | `com.googlecode.*` | **`riad.codes.*`** |
 | New capability | — | **`d2j-agent`** — HTTP/JSON tool API + coroutines progress streaming |
 | Removed | JDK-internal `sun.security.*` APK signer | self-contained signer (`ApkSign` still works) |
-| **Dex version support** | DEX 035–040 only | DEX **035–048** recognized (041 flagged experimental; `MAX_KNOWN_VERSION` vs `MAX_SUPPORTED_VERSION` split) |
+| **Dex version support** | DEX 035–040 only | DEX **035, 037–041 supported** — DEX **041** (Android 15) 0x78-byte container header is parsed for standalone files (the layout inside an APK's `classes*.dex`); a multi-entry container slice (non-zero `header_offset`) is rejected with an actionable error |
 
 ---
 
@@ -148,6 +148,22 @@ curl -X POST http://127.0.0.1:8787/v1/tools/dexInfo \
 }
 ```
 
+#### Example: run `dex2jar` (convert to a jar)
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/tools/dex2jar \
+     -H 'Content-Type: application/json' \
+     -d '{"input":"/path/to/app.apk","output":"/tmp/app.jar","reuseReg":true}'
+```
+
+#### Example: run `baksmali` (disassemble to smali)
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/tools/baksmali \
+     -H 'Content-Type: application/json' \
+     -d '{"input":"/path/to/app.dex","outputDir":"/tmp/out-smali"}'
+```
+
 #### Example: stream progress (SSE)
 
 ```bash
@@ -217,6 +233,36 @@ val server = AgentBridgeServer("127.0.0.1", 8787, ToolRegistry.defaults(), scope
 server.start()
 ```
 
+### Conversion engine (`DexEngine`) — recommended
+
+The modern facade is `riad.codes.d2j.engine.DexEngine`: one call converts a
+`.dex`/`.apk`/`.zip` into a validated jar with atomic publish, input limits,
+per-class progress, cancellation, and a structured report. The `d2j-dex2jar`
+CLI and the agent's `dex2jar` tool route through it.
+
+```kotlin
+import riad.codes.d2j.engine.DexEngine
+import riad.codes.d2j.engine.ConversionOptions
+
+val report = DexEngine.convert(
+    data = File("app.dex").readBytes(),
+    output = Path.of("app.jar"),
+    options = ConversionOptions(reuseReg = true),
+)
+println("${report.classCount} classes, dex ${report.dexVersion}")
+```
+
+Guarantees: the destination is only touched at the end via an atomic move (a
+failed or cancelled run never corrupts an existing jar); staging is always
+cleaned up; recoverable translate errors surface in `report.warnings` (or fail
+the run with `strict = true`); identical inputs produce byte-identical jars.
+
+Multidex containers are translated **per-DEX on a bounded worker pool** (first-
+DEX-wins dedup; output is byte-identical to the sequential run). Override the
+worker count with `ConversionOptions(parallelism = N)` (`0` = auto, `1` =
+sequential). `ConversionOptions(computeFrames = true)` opts into ASM stack-map
+frame computation with a safe fallback for Android classes.
+
 ### Lower-level conversion API
 
 ```kotlin
@@ -224,6 +270,20 @@ import riad.codes.d2j.dex.Dex2jar
 
 Dex2jar.from(File("app.dex")).topoLogicalSort().to(Path.of("app.jar"))
 ```
+
+---
+
+## Known limitations
+
+- **DEX 041 multi-entry containers.** Standalone DEX 041 files (the layout inside
+  an APK) are fully supported. A DEX 041 entry with a non-zero `header_offset`
+  (a slice of a multi-entry container) is rejected with an actionable message;
+  extract the individual entry first.
+- **CLI memory profile.** The engine builds the jar in memory before the atomic
+  publish (no partial output, but higher peak RSS than the legacy per-class
+  write on very large inputs).
+- **Bytecode validation** uses ASM `CheckClassAdapter` (structural data-flow),
+  not full JVM verification (type hierarchy needs a classpath).
 
 ---
 

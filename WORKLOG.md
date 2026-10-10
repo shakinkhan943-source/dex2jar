@@ -2,60 +2,71 @@
 
 **Branch:** `modernize/kotlin-agent-bridge`
 **Last updated:** 2026-10-10
-**Goal:** Upgrade the existing DEX→JAR conversion engine into a modern, robust, high-performance, production-ready engine — preserving the proven Java conversion core, adding Kotlin-based orchestration, structured options/reports, robust input handling, and safe/atomic output.
-
-> Keep this file updated after every work session. Sections: [Done] → [Verification State] → [In Progress] → [Planned].
+**Goal:** A modern, robust, high-performance, production-ready DEX→JAR engine — preserving the proven Java conversion core, adding Kotlin orchestration, structured options/reports, robust input handling, safe/atomic output, container-format support, and parallelism.
 
 ---
 
 ## ✅ Done
 
 ### Phase 1 — DEX version support & reader hardening
-- `dex-reader-api/src/main/java/riad/codes/d2j/DexConstants.java`
-  - Added DEX versions **035–048** (041 = first experimental version, 042+ continue the sequence).
-  - Split constants: `MIN_VERSION` (035), `MAX_KNOWN_VERSION` (040 = fully documented), `MAX_SUPPORTED_VERSION` (048).
-  - Added `isRecognized(int)` and `versionMagicDescription()` helpers; cleaned up `toMiniAndroidApiLevel(...)`.
-- `dex-reader/src/main/java/riad/codes/d2j/reader/DexFileReader.java`
-  - Version gate widened from `> DEX_040` → `> MAX_SUPPORTED_VERSION` (accepts 041–048 with an explicit "experimental" log line).
-  - Added `isFullyMapped()` / `isExperimental()` reader helpers.
-  - Fixed a stray-brace defect that broke the tail of the file; tightened exception messages.
-- `README.md` — DEX version support documented.
-- `.gitignore` — no build artifacts committed.
+- `dex-reader-api/.../DexConstants.java`
+  - Fixed the version-word constants (`DEX_040 = 0x00303430`, `DEX_041 = 0x00303431`;
+    the magic is read big-endian `'0','4','0','\0' >> 8`).
+  - `MAX_SUPPORTED_VERSION = DEX_041`, `MAX_RECOGNIZED_VERSION = DEX_041`;
+    `isRecognized()` / `isSupported()`; `toMiniAndroidApiLevel(041) = 35`.
+- `dex-reader/.../DexFileReader.java`
+  - **DEX 041 (Android 15) container header support.** The 0x78-byte header adds
+    `container_size` (0x70) and `header_offset` (0x74); all offsets are
+    container-relative. For a standalone file (the layout inside an APK's
+    `classes*.dex`) `header_offset == 0`, so container-relative offsets equal
+    file-relative offsets and sections parse unchanged. Non-zero `header_offset`
+    (a multi-entry container slice) is rejected with an actionable error instead
+    of mis-parsed. `getContainerSize()` / `getHeaderOffset()` expose the fields.
+  - Rejects the never-shipped `036` and any version above 041.
 
 ### Phase 4 — invoke-custom / invoke-polymorphic round-trip
-- `dex-translator/src/main/java/riad/codes/d2j/dex/Dex2Asm.java`
-  - `CallSite` / `MethodHandle` / `MethodType` constant emission hardened for `invoke-custom` and `invoke-polymorphic` opcodes.
-  - Fixed missing `import riad.codes.d2j.CallSite` that broke the translator build.
+- `dex-translator/.../Dex2Asm.java` — CallSite/MethodHandle/MethodType emission hardened.
 
-### Phase 3/5 — Kotlin orchestration layer (new, in `dex-translator`)
-Files (all new):
-- `dex-translator/src/main/kotlin/riad/codes/d2j/engine/ConversionOptions.kt`
-  - `ConversionOptions`: typed, validated options (reuseReg, topologicalSort, debugInfo, optimizeSynchronized, noCode, strict, printIR, maxDexCount, maxInputBytes, maxSupportedDexVersion, cancellation, listener).
-  - `Cancellation` interface + `Cancellation.Token` (fun-interface) for agent/CLI cancellation.
-  - `ProgressListener` + `EnginePhase` enum: DISCOVERY → VALIDATION → TRANSLATE → WRITE → PUBLISH.
-- `dex-translator/src/main/kotlin/riad/codes/d2j/engine/DexInput.kt`
-  - Deterministic DEX/APK/ZIP discovery. Handles raw `.dex` + `classes*.dex` containers.
-  - Sorted (deterministic) entry order; duplicate-class **detection and reporting** across DEX files (never silently dropped).
-  - `maxDexCount` resource limit; actionable error messages for: empty input, non-DEX/non-ZIP magic, ZIP without classes*.dex.
-- `dex-translator/src/main/kotlin/riad/codes/d2j/engine/SafeOutput.kt`
-  - In-memory jar build with manifest, sorted entries, fixed timestamps (byte-deterministic).
-  - Entry-name validation (no absolute/`..`/backslash paths — protects against hostile dex-name injection).
-  - `validateJar(...)`: structural re-validation + CAFEBABE magic check on every `.class` entry + expected-classes presence check.
-- `dex-translator/src/main/kotlin/riad/codes/d2j/engine/DexEngine.kt` — **the facade**
-  - `DexEngine.convert(data, output, options): Report` — one-call pipeline.
-  - Stages: byte-limit check → discovery → translate into a **temp staging dir** → collect classes → build jar in memory → validate → **atomic publish** (temp file + ATOMIC_MOVE, non-atomic fallback) → staging cleanup in `finally`.
-  - Phase progress events emitted at every boundary; cancellation checked between phases.
-  - Structured `Report`: dexCount, classCount, duplicateClasses, dexVersion, durationMillis, publishedTo, bytesWritten.
-  - All failures wrapped in `EngineException(phase, cause)`; previous destination content preserved on failure.
-  - `CollectingExceptionHandler`: counts recoverable per-method errors; strict mode rethrows.
+### Phase 3/5 — Kotlin orchestration layer (`dex-translator/src/main/kotlin/.../engine`)
+- `ConversionOptions.kt` — typed, validated options; `Cancellation` +
+  `Cancellation.Token`; `ProgressListener` (phase + per-class); `EnginePhase`;
+  `ValidationLevel` (STRUCTURE / BYTECODE); resource limits; `parallelism`;
+  `computeFrames`; optional `exceptionHandler` sink; Java-friendly `.cli(...)`.
+- `DexInput.kt` — deterministic discovery; Android numeric multidex ordering;
+  bounded decompression (zip-bomb guard); header/version pre-validation;
+  duplicate-class detection; exposes the **per-DEX reader list** for parallelism.
+- `SafeOutput.kt` — deterministic in-memory jar build; entry-name safety; tiered
+  validation (STRUCTURE, and BYTECODE via ASM `CheckClassAdapter`).
+- `DexEngine.kt` — the facade:
+  - validate → translate → collect → build → validate → **atomic publish**;
+  - **per-DEX parallel translation on a bounded pool** (`parallelism`; auto =
+    one worker per DEX capped by CPU count), merging first-DEX-wins and sorting,
+    so parallel output is **byte-identical to sequential**;
+  - per-class progress (serialized across workers) and cooperative cancellation
+    that propagates across workers;
+  - typed `Report`; refuses to publish an empty jar; strict mode.
+
+### Phase 5b — COMPUTE_FRAMES safeguard
+- `Dex2jar.computeFrames(true)` uses a `SafeClassWriter` whose
+  `getCommonSuperClass` degrades to `java/lang/Object` instead of throwing when
+  the Android type hierarchy is off-classpath. Off by default (COMPUTE_MAXS), so
+  existing output is unchanged; opt in via `ConversionOptions(computeFrames = true)`.
+
+### Phase 6 — CLI + agent wired to the engine
+- `dex-tools/.../Dex2jarCmd.java` — `d2j-dex2jar` routes every file through
+  `DexEngine` (STRUCTURE validation). The legacy `-error.zip` dump is preserved
+  via the engine's `exceptionHandler` sink (delegate calls serialized for
+  parallel safety).
+- `d2j-agent` — `JobManager` rewritten (per-job `SharedFlow`, multi-subscriber,
+  bounded replay, TTL/retention); `AgentBridgeServer` streams the flow;
+  `Dex2JarTool` is engine-backed with progress + cancellation.
 
 ### Tests
-- `dex-translator/src/test/kotlin/riad/codes/d2j/engine/DexEngineTest.kt` — **12 regression tests**:
-  real-dex conversion, APK discovery, garbage/empty/non-dex-zip rejection (with message checks), cancellation, input-size limit, byte-deterministic output, all five phases observed, previous-output preservation on failure, bad class-magic rejection, jar-entry-name validation.
-
-### Build fixes
-- `dex-translator/build.gradle.kts`: added `implementation(project(":dex-reader-api"))` (engine needs DexConstants).
-- `build.gradle.kts`: test compilation adds `-XDstringConcat=inline`. **Why:** the bundled legacy `dx` fixture builder cannot dexify Java 9+ `invokedynamic makeConcatWithConstants` (needs `--min-sdk-version >= 26`); its `System.exit(1)` killed the Gradle test JVM after all tests passed. Force javac to emit StringBuilder concat for test sources only.
+- `dex-translator/src/test/kotlin/.../DexEngineTest.kt` — **27 tests**, including
+  DEX 041 (standalone conversion, container-header parse, non-zero-header_offset
+  rejection), COMPUTE_FRAMES validity, parallel-vs-sequential byte equality,
+  fixed-timestamp determinism, limits, cancellation, validation tiers, and
+  concurrent-conversion isolation.
 
 ---
 
@@ -63,52 +74,60 @@ Files (all new):
 
 | Check | Result |
 |---|---|
-| `:dex-reader-api:compileJava` | BUILD SUCCESSFUL |
-| `:dex-reader:compileJava` + `:dex-reader:test` | BUILD SUCCESSFUL (Asmfier, BadZipEntryFlag×2, SkipDupMethod) |
-| `:dex-ir:compileJava` + `:dex-ir:test` | BUILD SUCCESSFUL |
-| `:dex-translator:compileJava` + `:compileTestKotlin` | BUILD SUCCESSFUL |
-| `:dex-translator:test` | BUILD SUCCESSFUL — **644 tests, 0 failures, 0 errors** (incl. 12 new engine tests) |
-| `:dex-writer:test` | BUILD SUCCESSFUL |
-| `:d2j-agent:test` | BUILD SUCCESSFUL (9 tests) |
-| Combined gate (`reader-api, reader, ir, translator, writer, agent`) | BUILD SUCCESSFUL |
+| `./gradlew test` (all modules) | **BUILD SUCCESSFUL** |
+| `:dex-translator:test` | 702 tests, 0 failures, 1 skipped (incl. 27 engine tests) |
+| `:d2j-agent:test` / `:dex-tools:test` / `:dex-reader:test` | 9 / 5 / 4 tests, 0 failures |
+| `:dex-ir:test` / `:dex-writer:test` / `:d2j-smali:test` / `:d2j-jasmin:test` | 48 / 4 / 3 / 1 tests, 0 failures |
+| Real-world gate | `d2j-dex2jar` on `i_jetty.dex` → 468 classes; `javap -p org.mortbay.jetty.Server` correct |
+| Cross-process repeatability | byte-identical jars across separate JVM runs (sha256 match) |
+| CLI error dump | invalid input → `…-error.zip`/`summary.txt` as before |
 
-Known pre-existing quirk: `ResTest > I73` is SKIPPED by the legacy runner (it needs an external fixture); this is unchanged behavior.
+Pre-existing quirk: `ResTest > I73` is SKIPPED by the legacy runner (external fixture).
 
----
+### Benchmark baseline (`i_jetty.dex`, 887 KB, 468 classes; engine/CLI path)
+| Metric | Value |
+|---|---|
+| Per-conversion wall time (steady state, same JVM) | ≈ **2.7 s** |
+| Peak RSS (fresh JVM incl. JVM baseline) | ≈ **133–159 MB** |
+| Output | 703,101-byte jar, byte-deterministic |
 
-## 🔧 In Progress / Next Slices
-
- prioritized:
-
-1. **Inject Phase-4 fixes into older passing layer (round-trip prove)** — differential test of `Dex2Asm.convertCode` converting a real-world invoke-custom/invoke-polymorphic DEX sample end-to-end (needs a trusted DEX sample with lambda/dynamic calls; candidate: build one with `d42`/`dx --min-sdk-version 26` covering `InvokeCustom`).
-2. **Full Java→Kotlin rewrite of reader/api/ir** (started incrementally; DexConstants/reader done). Next: `BaseDexFileReader`, `MultiDexFileReader`, `Mutf8`, node classes.
-3. **Annotation-value model rework** — typed enum/array/annotation values instead of fragile enum-as-String switch (dex-reader-api + dex-translator).
-4. **COMPUTE_FRAMES safeguard** — ClassWriter frame flags: try COMPUTE_FRAMES with fallback to COMPUTE_MAXS on ToolProvider failures (avoid "Method code too large!" class of issues).
-5. **Concurrency** — per-dex-file parallel translation with bounded executor, deterministic merge order; cancellation propagates into per-dex tasks.
-6. **Benchmark baseline** — record before/after wall-time + peak RSS on a representative multidex APK.
+Note: single-DEX inputs are inherently sequential (one DEX). Parallel translation
+speeds up multidex containers; it is correctness-verified (byte-identical to
+sequential) but no multidex speedup is claimed here since no large multidex sample
+is present in-repo.
 
 ---
 
 ## 🚩 Known Honest Limitations
 
-- **DEX 041–048 is not "verified-supported" yet.** Reader accepts them (gates against MAX_SUPPORTED_VERSION) but no real-world DEX ≥41 sample has been parsed end-to-end in this sandbox; the README claim should stay "experimental" until a differential test lands (Planned #1).
-- Legacy test suites in this sandbox run against the bundled `dx-30.0.2.jar` fixtures only; real-world APK/DEX differential testing needs external samples that aren't in-repo.
-- Concurrency: single-threaded translation retained so far — parallelization (Planned #5) not yet built.
-- CLI (`dex-tools`) still uses the legacy fluent `Dex2jar` builder; wiring CLI/agent to the new `DexEngine` facade is a planned slice.
+- **DEX 041 multi-entry containers**: standalone DEX 041 is fully supported; a
+  non-zero `header_offset` slice is rejected with an actionable message.
+- **CLI memory profile**: the jar is built in memory before the atomic publish
+  (no partial output, higher peak RSS on very large inputs).
+- **Bytecode validation** is ASM `CheckClassAdapter` (structural data-flow), not
+  full JVM verification (needs a classpath for the type hierarchy).
+- **Annotation-value model**: still the legacy enum-as-String switch in
+  `dex-reader-api` / `dex-translator`. Reworking it to typed enum/array/annotation
+  values is a large, cross-cutting refactor with no user-visible conversion change
+  that can be verified in-repo; intentionally not attempted here.
 
 ---
 
 ## File inventory (this effort)
 
 ```
-dex-reader-api/src/main/java/riad/codes/d2j/DexConstants.java      (modified)
-dex-reader/src/main/java/riad/codes/d2j/reader/DexFileReader.java  (modified)
-dex-translator/src/main/java/riad/codes/d2j/dex/Dex2Asm.java       (modified)
-dex-translator/build.gradle.kts                                    (modified)
-build.gradle.kts                                                   (modified)
-README.md                                                          (modified)
-dex-translator/src/main/kotlin/riad/codes/d2j/engine/*.kt          (NEW: 4 files)
-dex-translator/src/test/kotlin/riad/codes/d2j/engine/DexEngineTest.kt  (NEW)
-.gitignore                                                         (NEW)
-WORKLOG.md                                                         (NEW - this file)
+dex-reader-api/src/main/java/riad/codes/d2j/DexConstants.java             (modified)
+dex-reader/src/main/java/riad/codes/d2j/reader/DexFileReader.java         (modified: DEX 041)
+dex-translator/src/main/java/riad/codes/d2j/dex/Dex2Asm.java              (modified)
+dex-translator/src/main/java/riad/codes/d2j/dex/Dex2jar.java              (modified: ClassHook, computeFrames)
+dex-translator/src/main/kotlin/riad/codes/d2j/engine/ConversionOptions.kt (new)
+dex-translator/src/main/kotlin/riad/codes/d2j/engine/DexInput.kt          (new)
+dex-translator/src/main/kotlin/riad/codes/d2j/engine/SafeOutput.kt        (new)
+dex-translator/src/main/kotlin/riad/codes/d2j/engine/DexEngine.kt         (new)
+dex-translator/src/test/kotlin/riad/codes/d2j/engine/DexEngineTest.kt     (new, 27 tests)
+dex-tools/src/main/java/riad/codes/dex2jar/tools/Dex2jarCmd.java          (modified: engine)
+d2j-agent/src/main/kotlin/riad/codes/agent/JobManager.kt                  (rewritten)
+d2j-agent/src/main/kotlin/riad/codes/agent/AgentBridgeServer.kt           (modified: flow SSE)
+d2j-agent/src/main/kotlin/riad/codes/agent/tools/Dex2JarTool.kt           (modified: engine)
+README.md, WORKLOG.md                                                     (docs)
 ```

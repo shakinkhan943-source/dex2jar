@@ -27,6 +27,7 @@ import java.nio.file.spi.FileSystemProvider;
 import java.util.HashMap;
 import java.util.Map;
 
+import riad.codes.d2j.node.DexClassNode;
 import riad.codes.d2j.node.DexMethodNode;
 import riad.codes.d2j.reader.BaseDexFileReader;
 import org.objectweb.asm.ClassVisitor;
@@ -69,6 +70,68 @@ public class Dex2jar {
 
     private DexExceptionHandler exceptionHandler;
 
+    /**
+     * Optional per-class hook invoked by the translate loop (before a class is
+     * converted, and after its .class file has been written). Used by the
+     * Kotlin engine facade for per-class progress reporting and cancellation;
+     * null (legacy behavior) keeps the loop unconditional.
+     */
+    public interface ClassHook {
+        /** @return false to abort the conversion (results written so far are kept). */
+        boolean onClass(String className, int index, int total);
+
+        default void onClassWritten(String className, int index, int total) {
+        }
+    }
+
+    /** Thrown internally when a [ClassHook] requests cancellation. */
+    public static class ConversionCancelledException extends RuntimeException {
+        public ConversionCancelledException(String message) {
+            super(message);
+        }
+    }
+
+    private ClassHook classHook;
+    private boolean computeFrames;
+
+    public Dex2jar withClassHook(ClassHook hook) {
+        this.classHook = hook;
+        return this;
+    }
+
+    /**
+     * Emit stack map frames (ASM COMPUTE_FRAMES) instead of only COMPUTE_MAXS.
+     * Frame computation needs the referenced type hierarchy, which is usually not
+     * on the classpath for Android classes; {@link SafeClassWriter} degrades to
+     * {@code java/lang/Object} instead of throwing, so this never fails the run.
+     * Off by default (COMPUTE_MAXS only); the produced class files are valid either
+     * way because Android's runtime recomputes frames for dex-derived classes.
+     */
+    public Dex2jar computeFrames(boolean b) {
+        this.computeFrames = b;
+        return this;
+    }
+
+    /**
+     * ClassWriter that never throws from {@code getCommonSuperClass}: a missing
+     * type hierarchy degrades to {@code java/lang/Object}. This is the
+     * &quot;safeguard&quot; that makes COMPUTE_FRAMES usable on Android bytecode.
+     */
+    static class SafeClassWriter extends ClassWriter {
+        SafeClassWriter(int flags) {
+            super(flags);
+        }
+
+        @Override
+        protected String getCommonSuperClass(String type1, String type2) {
+            try {
+                return super.getCommonSuperClass(type1, type2);
+            } catch (Throwable t) {
+                return "java/lang/Object";
+            }
+        }
+    }
+
     final private BaseDexFileReader reader;
     private int readerConfig;
     private int v3Config;
@@ -88,9 +151,19 @@ public class Dex2jar {
             exceptionHandler.handleFileException(ex);
         }
         ClassVisitorFactory cvf = new ClassVisitorFactory() {
+            // cvf.create is called once per class, in fileNode.clzs declaration order
+            private int index = 0;
+
             @Override
             public ClassVisitor create(final String name) {
-                final ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+                final int total = fileNode.clzs == null ? 0 : fileNode.clzs.size();
+                final int idx = index++;
+                if (classHook != null && !classHook.onClass(name, idx, total)) {
+                    throw new ConversionCancelledException("conversion cancelled before class " + name);
+                }
+                final ClassWriter cw = computeFrames
+                        ? new SafeClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS)
+                        : new ClassWriter(ClassWriter.COMPUTE_MAXS);
                 final LambadaNameSafeClassAdapter rca = new LambadaNameSafeClassAdapter(cw);
                 return new ClassVisitor(Opcodes.ASM9, rca) {
                     @Override
@@ -115,6 +188,9 @@ public class Dex2jar {
                             Files.write(dist1, data);
                         } catch (IOException e) {
                             e.printStackTrace(System.err);
+                        }
+                        if (classHook != null) {
+                            classHook.onClassWritten(className, idx, total);
                         }
                     }
                 };

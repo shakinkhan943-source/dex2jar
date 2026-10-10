@@ -3,7 +3,9 @@ package riad.codes.agent
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import java.io.OutputStream
@@ -120,7 +122,7 @@ class AgentBridgeServer(
         sseHeaders(exchange)
         val out = exchange.responseBody
         writeEvent(out, mapOf("type" to "job", "jobId" to handle.id, "tool" to tool.spec.name))
-        pump(out, handle.events)
+        pump(out, handle)
         handle.result?.let { writeEvent(out, mapOf("type" to "result", "result" to it)) }
         out.flush()
     }
@@ -130,17 +132,35 @@ class AgentBridgeServer(
         sseHeaders(exchange)
         val out = exchange.responseBody
         writeEvent(out, mapOf("type" to "job", "jobId" to id, "tool" to handle.tool))
-        pump(out, handle.events)
+        pump(out, handle)
         handle.result?.let { writeEvent(out, mapOf("type" to "result", "result" to it)) }
         out.flush()
     }
 
-    private fun pump(out: OutputStream, events: ReceiveChannel<ProgressEvent>) {
-        runBlocking {
-            for (event in events) {
-                writeEvent(out, mapOf("type" to "progress", "event" to event))
-            }
+    /**
+     * Stream [handle]'s progress to [out]: replay everything a late/reconnecting
+     * subscriber missed, then follow live events until the job completes. Uses
+     * the job's shared flow, so several SSE clients can watch the same job
+     * concurrently without stealing each other's events.
+     */
+    private fun pump(out: OutputStream, handle: JobManager.JobHandle) {
+        if (handle.done) {
+            handle.replay().forEach { writeProgress(out, it) }
+            return
         }
+        runBlocking {
+            val collector = launch {
+                handle.events().collect { writeProgress(out, it) }
+            }
+            handle.awaitCompletion()
+            // Give the collector a moment to drain the buffered tail before stopping.
+            delay(100)
+            collector.cancelAndJoin()
+        }
+    }
+
+    private fun writeProgress(out: OutputStream, event: ProgressEvent) {
+        writeEvent(out, mapOf("type" to "progress", "event" to event))
     }
 
     private fun sseHeaders(exchange: HttpExchange) {
