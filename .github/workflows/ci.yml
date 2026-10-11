@@ -54,7 +54,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: dex2jar-${{ github.ref_name }}
+          name: dex2jar-${{ github.run_id }}
           path: |
             build/libs/dex2jar-3.0.jar
             dex-tools/build/distributions/dex-tools.zip
