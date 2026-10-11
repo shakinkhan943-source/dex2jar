@@ -68,6 +68,28 @@ jobs:
       - name: Build CLI distribution
         run: ./gradlew --no-daemon :dex-tools:distZip
 
+      - name: Verify CLI distribution excludes build-time tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIST="dex-tools/build/distributions/dex-tools.zip"
+          test -s "$DIST"
+          DIST_BYTES="$(stat -c%s "$DIST")"
+          echo "CLI distribution size: $(du -h "$DIST" | cut -f1)"
+          echo "CLI distribution bytes: $DIST_BYTES"
+          if [ "$DIST_BYTES" -gt 8000000 ]; then
+            echo "CLI distribution is unexpectedly large (>8MB)"
+            unzip -l "$DIST" | sort -nr | head -20
+            exit 1
+          fi
+          if unzip -Z1 "$DIST" | grep -Eq '^dex-tools/lib/(icu4j-|antlr4-[0-9]|ST4-|org\.abego\.treelayout\.core-|antlr-[0-9])'; then
+            echo "CLI distribution contains ANTLR generators or generator-only dependencies"
+            unzip -Z1 "$DIST" | grep -E '^dex-tools/lib/(icu4j-|antlr4-[0-9]|ST4-|org\.abego\.treelayout\.core-|antlr-[0-9])'
+            exit 1
+          fi
+          unzip -Z1 "$DIST" | grep -E '^dex-tools/lib/antlr4-runtime-[0-9].*\.jar$'
+          unzip -Z1 "$DIST" | grep -E '^dex-tools/lib/antlr-runtime-3\.5\.2\.jar$'
+
       - name: Archive distributable artifacts
         uses: actions/upload-artifact@v4
         if: success()
