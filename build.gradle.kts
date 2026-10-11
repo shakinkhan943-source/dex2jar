@@ -34,6 +34,11 @@ val javaBytecodeTarget = JavaVersion.VERSION_17
 val javaBytecodeTargetJvm = JvmTarget.JVM_17
 val libsCatalog = extensions.getByType<VersionCatalogsExtension>().named("libs")
 
+repositories {
+    mavenCentral()
+    google()
+}
+
 group = "riad.codes.d2j"
 version = "3.0"
 
