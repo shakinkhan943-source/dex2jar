@@ -11,7 +11,6 @@ dependencies {
     implementation(libs.asm.util)
     implementation(libs.asm.analysis)
     implementation(libs.kotlin.stdlib)
-    implementation(libs.coroutines.core)
     testImplementation(project(":d2j-smali"))
     testImplementation(project(":d2j-jasmin"))
     // Annotation round-trip tests assemble smali into a dex via DexFileWriter.
