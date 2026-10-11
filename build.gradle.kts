@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.SourceSetContainer
 
 plugins {
     `java-library`
@@ -121,8 +122,11 @@ tasks.named<Jar>("jar") {
         attributes["Implementation-Title"] = "dex2jar"
         attributes["Implementation-Version"] = project.version
     }
+    // A project dependency can resolve to a classes directory rather than a JAR.
+    // Include dex-tools compiled output explicitly, then unpack external runtime JARs.
+    from({ project(":dex-tools").extensions.getByType<SourceSetContainer>().named("main").get().output })
     from({
-        bundledRuntime.files.filter { it.isFile }.map { zipTree(it) }
+        bundledRuntime.files.filter { it.isFile && it.extension == "jar" }.map { zipTree(it) }
     })
     exclude(
         "META-INF/*.SF",
