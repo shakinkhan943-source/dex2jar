@@ -1,7 +1,7 @@
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import org.gradle.jvm.tasks.Jar
+import org.gradle.api.tasks.bundling.Jar
 
 plugins {
     `java-library`
