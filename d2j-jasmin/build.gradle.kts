@@ -4,6 +4,12 @@ plugins {
     id("antlr")
 }
 
+// The ANTLR 3 generator is needed only by generateGrammarSource. Keep it out
+// of api/runtime classpaths; the parser runtime is declared explicitly below.
+configurations.named("api") {
+    setExtendsFrom(extendsFrom.filterNot { it.name == "antlr" })
+}
+
 dependencies {
     implementation(project(":d2j-base-cmd"))
     implementation(libs.asm.tree)
