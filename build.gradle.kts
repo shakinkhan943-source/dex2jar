@@ -35,6 +35,11 @@ val packagedRuntime by configurations.creating {
     isCanBeResolved = true
 }
 
+val antlr3Runtime by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
 dependencies {
     add(packagedRuntime.name, libsCatalog.findLibrary("kotlin-stdlib").get())
     add(packagedRuntime.name, libsCatalog.findLibrary("asm").get())
@@ -44,7 +49,11 @@ dependencies {
     add(packagedRuntime.name, libsCatalog.findLibrary("asm-analysis").get())
     add(packagedRuntime.name, libsCatalog.findLibrary("antlr4-runtime").get())
     // Jasmin's ANTLR 3 parser needs the runtime, not the ANTLR 3 generator.
-    add(packagedRuntime.name, "org.antlr:antlr-runtime:3.5.2")
+    // Resolved on its own so the generator's transitive build-time tooling
+    // (StringTemplate, ICU4J, ...) can never leak into the fat JAR.
+    add(antlr3Runtime.name, "org.antlr:antlr-runtime:3.5.2") {
+        isTransitive = false
+    }
 }
 
 repositories {
@@ -138,9 +147,19 @@ tasks.named<Jar>("jar") {
     })
     // Bundle only the required parser runtimes, Kotlin stdlib, and ASM libraries.
     from({
-        packagedRuntime.resolve().map { zipTree(it) }
+        (packagedRuntime.resolve() + antlr3Runtime.resolve()).map { zipTree(it) }
     })
+    // Belt-and-suspenders: never ship build-time generator tooling or other
+    // non-runtime artifacts even if the dependency graph changes later.
     exclude(
+        "org/antlr/v4/parse/**",
+        "org/antlr/v4/analysis/**",
+        "org/antlr/v4/misc/**",
+        "org/antlr/v4/tool/**",
+        "org/antlr/template/**",
+        "com/ibm/icu/**",
+        "**/*.g4",
+        "**/antlr.main.g4",
         "META-INF/*.SF",
         "META-INF/*.DSA",
         "META-INF/*.RSA",
