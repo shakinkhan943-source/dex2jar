@@ -41,7 +41,7 @@ val binGen = tasks.register<JavaExec>("binGen") {
     description = "Generate the d2j-* launcher scripts"
     dependsOn(tasks.named("jar"))
     classpath = sourceSets.main.get().runtimeClasspath
-    mainClass.set("riad.codes.d2j.bin_gen.BinGen")
+    mainClass.set("riad.codes.dex2jar.bin_gen.BinGen")
 
     val cfgDir = layout.projectDirectory.dir("src/main/bin_gen")
     val binDir = layout.buildDirectory.dir("generated-sources/bin")
