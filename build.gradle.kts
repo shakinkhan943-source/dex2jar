@@ -117,7 +117,7 @@ tasks.named<Jar>("jar") {
         attributes["Implementation-Version"] = project.version
     }
     from({
-        bundledRuntime.get().filter { it.isFile }.map { zipTree(it) }
+        bundledRuntime.files.filter { it.isFile }.map { zipTree(it) }
     })
     exclude(
         "META-INF/*.SF",
