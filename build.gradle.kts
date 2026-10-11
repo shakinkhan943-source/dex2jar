@@ -171,12 +171,29 @@ tasks.named<Jar>("jar") {
     )
 }
 
+/**
+ * JitPack publishes whatever the root `mavenJava` publication contains. The
+ * plain `java` component would also attach the sources jar and, worse, pull
+ * in Gradle module metadata that advertises transitive project dependencies
+ * (riad.codes.d2j:dex-translator, :d2j-smali, ...). Those sub-artifacts are
+ * not published on their own, so a consumer resolving them through JitPack
+ * would trigger extra builds/downloads.
+ *
+ * This publication therefore ships EXACTLY ONE file: the self-contained fat
+ * `dex2jar-3.0.jar` produced by the root Jar task above. The POM has no
+ * <dependencies> section at all, so adding
+ *     implementation("com.github.shakinkhan943-source:dex2jar:<ref>")
+ * to your project downloads only that single ~4 MB jar - nothing else.
+ */
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
-            from(components["java"])
             groupId = "com.github.shakinkhan943-source"
             artifactId = "dex2jar"
+            // Intentionally NOT using `from(components["java"])`: no sources
+            // jar, no .module metadata, no transitive dependency list.
+            artifacts.clear()
+            artifact(tasks.named("jar"))
         }
     }
 }
