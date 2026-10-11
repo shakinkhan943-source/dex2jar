@@ -42,7 +42,7 @@ jobs:
           jar tf "$JAR" | grep -F "riad/codes/dex2jar/tools/Dex2jarCmd.class"
           jar tf "$JAR" | grep -F "org/objectweb/asm/ClassReader.class"
           jar tf "$JAR" | grep -F "kotlin/Unit.class"
-          if jar tf "$JAR" | grep -E '\\.jar$'; then
+          if jar tf "$JAR" | grep -F ".jar"; then
             echo "Fat JAR unexpectedly contains nested JAR files"
             exit 1
           fi
