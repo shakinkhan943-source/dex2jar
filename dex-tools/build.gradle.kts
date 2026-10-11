@@ -17,10 +17,6 @@ dependencies {
     implementation(libs.asm.util)
     implementation(libs.asm.commons)
     implementation(libs.kotlin.stdlib)
-    implementation(libs.coroutines.core)
-    implementation(libs.jackson.databind)
-    implementation(libs.jackson.kotlin)
-    implementation(libs.slf4j.simple)
 }
 
 application {
