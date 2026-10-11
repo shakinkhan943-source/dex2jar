@@ -2,6 +2,7 @@ import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.gradle.api.tasks.bundling.Jar
+import org.gradle.api.tasks.testing.Test
 
 plugins {
     `java-library`
@@ -70,6 +71,10 @@ subprojects {
             jvmTarget.set(javaBytecodeTargetJvm)
             freeCompilerArgs.add("-Xjdk-release=17")
         }
+    }
+
+    tasks.withType<Test>().configureEach {
+        useJUnitPlatform()
     }
 
     tasks.matching { it.name == "javadoc" }.configureEach {
