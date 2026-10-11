@@ -37,6 +37,7 @@ jobs:
           JAR="build/libs/dex2jar-3.0.jar"
           test -s "$JAR"
           echo "Artifact size: $(du -h "$JAR" | cut -f1)"
+          if [ "$(stat -c%s "$JAR")" -gt 8000000 ]; then echo "Jar too large (>8MB)"; unzip -l "$JAR" | awk '{print $4}' | cut -d/ -f1-2 | sort | uniq -c | sort -rn | head -15; exit 1; fi
           unzip -t "$JAR"
           unzip -p "$JAR" META-INF/MANIFEST.MF | grep -F "Main-Class: riad.codes.dex2jar.tools.Dex2jarCmd"
           jar tf "$JAR" | grep -F "riad/codes/dex2jar/tools/Dex2jarCmd.class"
