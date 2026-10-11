@@ -28,7 +28,7 @@ repositories {
     google()
 }
 
-group = "riad.codes.d2j"
+group = "com.github.shakinkhan943-source"
 version = "3.0"
 
 subprojects {
@@ -138,7 +138,7 @@ publishing {
     publications {
         create<MavenPublication>("mavenJava") {
             from(components["java"])
-            groupId = "riad.codes.d2j"
+            groupId = "com.github.shakinkhan943-source"
             artifactId = "dex2jar"
         }
     }
