@@ -112,7 +112,8 @@ tasks.named<Jar>("jar") {
     // Add every module's compiled classes/resources directly. Avoid unpacking the
     // subprojects' generated JARs, which would create implicit task dependencies
     // rejected by recent Gradle versions.
-    from(subprojects.map { subproject ->
+    // d2j-agent (HTTP/JSON bridge) is a separate app and is not part of the library jar.
+    from(subprojects.filter { it.name != "d2j-agent" }.map { subproject ->
         subproject.extensions.getByType<SourceSetContainer>().named("main").get().output
     })
     // Unpack only third-party modules; local project artifacts are already covered
@@ -131,6 +132,9 @@ tasks.named<Jar>("jar") {
         "META-INF/*.RSA",
         "META-INF/INDEX.LIST",
         "module-info.class",
+        "META-INF/versions/**/module-info.class",
+        "META-INF/LICENSE*",
+        "META-INF/NOTICE*",
     )
 }
 
