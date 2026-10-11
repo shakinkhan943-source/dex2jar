@@ -62,6 +62,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify root JitPack publication task
+        run: ./gradlew --no-daemon :publishMavenJavaPublicationToMavenLocal -x test
+
       - name: Build CLI distribution
         run: ./gradlew --no-daemon :dex-tools:distZip
 
