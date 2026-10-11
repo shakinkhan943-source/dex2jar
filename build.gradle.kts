@@ -29,7 +29,7 @@ dependencies {
  * Gradle/JVM dependencies by downstream projects, so the emitted class files
  * must be loadable by the lowest JDK a consumer is likely to run on. Java 17
  * is the modern LTS baseline, so everything is compiled with --release 17 /
- * -jvm-target 17 even though the build itself runs on JDK 21.
+ * -jvm-target 17 and the build itself runs on JDK 17.
  */
 val javaBytecodeTarget = JavaVersion.VERSION_17
 val javaBytecodeTargetJvm = JvmTarget.JVM_17
