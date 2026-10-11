@@ -4,25 +4,12 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 
 plugins {
     `java-library`
     `maven-publish`
     alias(libs.plugins.kotlin.jvm) apply false
-}
-
-/**
- * The root Maven/JitPack artifact is the runnable, self-contained dex2jar CLI.
- * Keep its dependencies in a dedicated configuration so the published POM does
- * not also pull the same libraries separately beside the fat JAR.
- */
-val bundledRuntime by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-}
-
-dependencies {
-    bundledRuntime(project(":dex-tools"))
 }
 
 /**
@@ -122,11 +109,21 @@ tasks.named<Jar>("jar") {
         attributes["Implementation-Title"] = "dex2jar"
         attributes["Implementation-Version"] = project.version
     }
-    // A project dependency can resolve to a classes directory rather than a JAR.
-    // Include dex-tools compiled output explicitly, then unpack external runtime JARs.
-    from({ project(":dex-tools").extensions.getByType<SourceSetContainer>().named("main").get().output })
+    // Add every module's compiled classes/resources directly. Avoid unpacking the
+    // subprojects' generated JARs, which would create implicit task dependencies
+    // rejected by recent Gradle versions.
+    from(subprojects.map { subproject ->
+        subproject.extensions.getByType<SourceSetContainer>().named("main").get().output
+    })
+    // Unpack only third-party modules; local project artifacts are already covered
+    // by the source-set outputs above.
     from({
-        bundledRuntime.files.filter { it.isFile && it.extension == "jar" }.map { zipTree(it) }
+        project(":dex-tools").configurations.getByName("runtimeClasspath")
+            .incoming.artifactView {
+                componentFilter { it is ModuleComponentIdentifier }
+            }
+            .files
+            .map { zipTree(it) }
     })
     exclude(
         "META-INF/*.SF",
