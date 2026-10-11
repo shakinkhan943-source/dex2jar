@@ -4,6 +4,14 @@ plugins {
     id("antlr")
 }
 
+// Gradle's ANTLR plugin makes the "api" configuration inherit from "antlr".
+// That leaks the ANTLR generator and its ICU/StringTemplate tool dependencies
+// onto application runtime classpaths. The runtime is declared separately below,
+// so keep the generator configuration isolated to grammar generation.
+configurations.named("api") {
+    setExtendsFrom(extendsFrom.filterNot { it.name == "antlr" })
+}
+
 dependencies {
     implementation(project(":dex-reader"))
     implementation(project(":dex-writer"))
