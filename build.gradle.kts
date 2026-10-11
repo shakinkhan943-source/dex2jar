@@ -4,7 +4,6 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.SourceSetContainer
-import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 
 plugins {
     `java-library`
@@ -22,6 +21,31 @@ plugins {
 val javaBytecodeTarget = JavaVersion.VERSION_17
 val javaBytecodeTargetJvm = JvmTarget.JVM_17
 val libsCatalog = extensions.getByType<VersionCatalogsExtension>().named("libs")
+
+/**
+ * Only libraries used by the executable CLI belong in the fat JAR.
+ *
+ * Do not derive this from dex-tools' complete runtimeClasspath: Gradle's
+ * generated-parser/tooling graph can pull in the ANTLR generator, StringTemplate
+ * and ICU4J. Those are build-time tools, not dex2jar runtime requirements.
+ * Project classes are added separately below.
+ */
+val packagedRuntime by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
+dependencies {
+    add(packagedRuntime.name, libsCatalog.findLibrary("kotlin-stdlib").get())
+    add(packagedRuntime.name, libsCatalog.findLibrary("asm").get())
+    add(packagedRuntime.name, libsCatalog.findLibrary("asm-commons").get())
+    add(packagedRuntime.name, libsCatalog.findLibrary("asm-tree").get())
+    add(packagedRuntime.name, libsCatalog.findLibrary("asm-util").get())
+    add(packagedRuntime.name, libsCatalog.findLibrary("asm-analysis").get())
+    add(packagedRuntime.name, libsCatalog.findLibrary("antlr4-runtime").get())
+    // Jasmin's ANTLR 3 parser needs the runtime, not the ANTLR 3 generator.
+    add(packagedRuntime.name, "org.antlr:antlr-runtime:3.5.2")
+}
 
 repositories {
     mavenCentral()
@@ -96,10 +120,9 @@ subprojects {
  * Root artifact used by the simple JitPack coordinate:
  * com.github.shakinkhan943-source:dex2jar:3.0
  *
- * The old root project had no Java component/JAR at all. JitPack therefore
- * could not serve the expected single artifact, while dex-tools only produced
- * a multi-file ZIP distribution. This task bundles dex-tools and every runtime
- * dependency into the root JAR so downloaders receive one complete executable.
+ * This self-contained executable bundles the project's main outputs and a
+ * small allow-list of runtime libraries. Test classes, the HTTP/JSON agent,
+ * parser generators and their build-time dependencies are intentionally omitted.
  */
 tasks.named<Jar>("jar") {
     archiveBaseName.set("dex2jar")
@@ -109,22 +132,13 @@ tasks.named<Jar>("jar") {
         attributes["Implementation-Title"] = "dex2jar"
         attributes["Implementation-Version"] = project.version
     }
-    // Add every module's compiled classes/resources directly. Avoid unpacking the
-    // subprojects' generated JARs, which would create implicit task dependencies
-    // rejected by recent Gradle versions.
-    // d2j-agent (HTTP/JSON bridge) is a separate app and is not part of the library jar.
+    // Project source-set main outputs only; never include test outputs or d2j-agent.
     from(subprojects.filter { it.name != "d2j-agent" }.map { subproject ->
         subproject.extensions.getByType<SourceSetContainer>().named("main").get().output
     })
-    // Unpack only third-party modules; local project artifacts are already covered
-    // by the source-set outputs above.
+    // Bundle only the required parser runtimes, Kotlin stdlib, and ASM libraries.
     from({
-        project(":dex-tools").configurations.getByName("runtimeClasspath")
-            .incoming.artifactView {
-                componentFilter { it is ModuleComponentIdentifier }
-            }
-            .files
-            .map { zipTree(it) }
+        packagedRuntime.resolve().map { zipTree(it) }
     })
     exclude(
         "META-INF/*.SF",
