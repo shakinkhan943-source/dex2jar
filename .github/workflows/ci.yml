@@ -2,11 +2,16 @@ name: Java CI with Gradle
 
 on:
   push:
-    branches: [ 2.x ]
+    branches:
+      - "2.x"
+      - "modernize/kotlin-agent-bridge"
     tags:
-      - v*
+      - "v*"
+      - "3.*"
   pull_request:
-    branches: [ 2.x ]
+    branches:
+      - "2.x"
+      - "modernize/kotlin-agent-bridge"
   workflow_dispatch:
 
 jobs:
@@ -18,16 +23,38 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'gradle'
-      - name: Build with Gradle
-        run: ./gradlew "-DGITHUB_REF_NAME=${GITHUB_REF_NAME}" assemble test
-      - name: Build distribution
-        run: ./gradlew distZip
-      - name: Archive dex tools
+          java-version: "21"
+          distribution: "temurin"
+          cache: gradle
+
+      - name: Build and test
+        run: ./gradlew --no-daemon assemble test
+
+      - name: Verify self-contained JitPack JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="build/libs/dex2jar-3.0.jar"
+          test -s "$JAR"
+          echo "Artifact size: $(du -h "$JAR" | cut -f1)"
+          unzip -t "$JAR"
+          unzip -p "$JAR" META-INF/MANIFEST.MF | grep -F "Main-Class: riad.codes.dex2jar.tools.Dex2jarCmd"
+          jar tf "$JAR" | grep -F "riad/codes/dex2jar/tools/Dex2jarCmd.class"
+          jar tf "$JAR" | grep -F "org/objectweb/asm/ClassReader.class"
+          jar tf "$JAR" | grep -F "kotlin/Unit.class"
+          if jar tf "$JAR" | grep -E '\\.jar$'; then
+            echo "Fat JAR unexpectedly contains nested JAR files"
+            exit 1
+          fi
+
+      - name: Build CLI distribution
+        run: ./gradlew --no-daemon :dex-tools:distZip
+
+      - name: Archive distributable artifacts
         uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: dex-tools
-          path: dex-tools/build/distributions/dex-tools-*.zip
+          name: dex2jar-${{ github.ref_name }}
+          path: |
+            build/libs/dex2jar-3.0.jar
+            dex-tools/build/distributions/dex-tools.zip
