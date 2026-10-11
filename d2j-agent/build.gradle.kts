@@ -24,4 +24,7 @@ dependencies {
 
 application {
     mainClass.set("riad.codes.agent.AgentBridgeCliKt")
+    // Same reason as dex-tools: keep default-charset behaviour identical on
+    // JDK 17 (locale-dependent) and JDK 18+ (forced UTF-8).
+    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8")
 }

@@ -14,6 +14,8 @@ dependencies {
     implementation(libs.coroutines.core)
     testImplementation(project(":d2j-smali"))
     testImplementation(project(":d2j-jasmin"))
+    // Annotation round-trip tests assemble smali into a dex via DexFileWriter.
+    testImplementation(project(":dex-writer"))
     // Legacy tests use the bundled Android `dx` tool to build dex fixtures.
     testImplementation(files("libs/dx-30.0.2.jar"))
     testImplementation(libs.junit.api)

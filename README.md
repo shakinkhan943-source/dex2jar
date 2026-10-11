@@ -14,7 +14,7 @@ a local HTTP bridge with real-time progress**.
 | Area | Before | Now |
 |------|--------|-----|
 | Build | Gradle 6.9.1 (Groovy), `compile`/`maven` plugins | **Gradle 9.8.1**, Kotlin DSL, version catalog |
-| Language target | Java 8 | **JVM 21** (LTS) |
+| Language target | Java 8 | **JVM 17 bytecode** (LTS baseline; the build itself runs on Gradle's JDK 21) |
 | Kotlin toolchain | — | **Kotlin 2.4.21** Gradle plugin |
 | Bytecode lib | ASM 9.5 | **ASM 9.11** |
 | Tests | JUnit 4 only | **JUnit 6.1.3** (Jupiter) + Vintage bridge for legacy tests |
@@ -42,7 +42,12 @@ d2j-agent        AI agent bridge (HTTP/JSON + real-time progress)   <-- new
 
 ## Requirements
 
-* JDK 21+
+* **JDK 17+ to *run* the tools.** Every published artifact (and every bundled
+  dependency) is compiled to Java 17 bytecode (class-file major version 61) and
+  runs on a JDK 17 JVM. The Gradle *build* runs on the Gradle JVM and is
+  CI-tested on JDK 21; `--release 17` / `-jvm-target 17` guarantee that no
+  JDK 18+ API leaks into the output, so consuming this from a Java 17 Gradle
+  project raises no `UnsupportedClassVersionError` and no toolchain mismatch.
 * No external runtime dependencies beyond the Gradle-resolved libraries.
 
 ## Build
@@ -255,7 +260,9 @@ println("${report.classCount} classes, dex ${report.dexVersion}")
 Guarantees: the destination is only touched at the end via an atomic move (a
 failed or cancelled run never corrupts an existing jar); staging is always
 cleaned up; recoverable translate errors surface in `report.warnings` (or fail
-the run with `strict = true`); identical inputs produce byte-identical jars.
+the run with `strict = true`). A fresh JVM process converts a given input to the
+same bytes on the same JDK; see *Known limitations* for the (cosmetic) register
+numbering caveat.
 
 Multidex containers are translated **per-DEX on a bounded worker pool** (first-
 DEX-wins dedup; output is byte-identical to the sequential run). Override the
@@ -276,14 +283,33 @@ Dex2jar.from(File("app.dex")).topoLogicalSort().to(Path.of("app.jar"))
 ## Known limitations
 
 - **DEX 041 multi-entry containers.** Standalone DEX 041 files (the layout inside
-  an APK) are fully supported. A DEX 041 entry with a non-zero `header_offset`
-  (a slice of a multi-entry container) is rejected with an actionable message;
-  extract the individual entry first.
+  an APK, `header_offset == 0`) are fully supported. A DEX 041 entry with a
+  non-zero `header_offset` (a slice of a *multi-entry* container) is rejected
+  with an actionable message. This is deliberate: multi-entry containers are an
+  **experimental Android 16 / ART feature that the platform documents as not for
+  production use**, they never appear inside APKs, and a container entry's
+  offsets are container-relative (they would need a full relink to read
+  standalone). Extract the individual entry first if you have one.
+- **Byte-identity is per fresh JVM, not global.** For a given input the same
+  JDK produces the same bytes in a fresh process (verified across processes),
+  but the legacy IR still walks a few identity-hash-keyed collections, so
+  register/local *numbering* can differ (a) between repeated conversions inside
+  one long-lived JVM and (b) across JDK versions (e.g. JDK 17 vs 21). The
+  bytecode is semantically equivalent and passes the engine's ASM bytecode
+  validation in every case. Practical rule: don't compare jar hashes across JDKs
+  or after in-process repeats. The generated launchers pin
+  `-Dfile.encoding=UTF-8`, because JDK 17 inherits the OS locale's charset while
+  JDK 18+ forces UTF-8.
 - **CLI memory profile.** The engine builds the jar in memory before the atomic
   publish (no partial output, but higher peak RSS than the legacy per-class
   write on very large inputs).
 - **Bytecode validation** uses ASM `CheckClassAdapter` (structural data-flow),
   not full JVM verification (type hierarchy needs a classpath).
+- **Annotation values** (enum / array / nested annotation / class literal) are
+  carried as typed values through the reader → IR → ASM path and are covered by a
+  differential smali→dex→jar round-trip test. Internally an enum constant is
+  still represented as a `Field` (owner-less) rather than a dedicated node type;
+  this is an internal representation detail, not a conversion-correctness issue.
 
 ---
 

@@ -7,8 +7,13 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 import org.junit.jupiter.api.io.TempDir
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.tree.ClassNode
 import riad.codes.d2j.DexConstants
+import riad.codes.d2j.dex.writer.DexFileWriter
+import riad.codes.d2j.node.DexFileNode
 import riad.codes.d2j.reader.DexFileReader
+import riad.codes.d2j.smali.Smali
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,6 +41,18 @@ class DexEngineTest {
 
     private fun opts(cancel: Cancellation = Cancellation.NONE): ConversionOptions =
         ConversionOptions(reuseReg = false, cancellation = cancel)
+
+    /** Read one entry out of a jar the engine published. */
+    private fun jarEntry(jar: Path, name: String): ByteArray {
+        java.util.zip.ZipInputStream(Files.newInputStream(jar)).use { z ->
+            while (true) {
+                val e = z.nextEntry ?: break
+                if (e.name == name) return z.readBytes()
+                z.closeEntry()
+            }
+        }
+        throw AssertionError("no entry '$name' in $jar")
+    }
 
     private fun putIntLE(bytes: ByteArray, offset: Int, value: Int) {
         bytes[offset] = (value and 0xFF).toByte()
@@ -221,6 +238,64 @@ class DexEngineTest {
             e.message.orEmpty().contains("header_offset"),
             "multi-entry container must be rejected with an actionable message: ${e.message}",
         )
+    }
+
+    // ---------------- annotation value model ----------------
+
+    /**
+     * Differential test for typed annotation values. An annotation carrying an
+     * enum constant, an array, a nested annotation, a class literal and a
+     * boolean must survive smali -> dex -> jar with its *types* intact rather
+     * than collapsing to strings. This pins the enum-as-Field encoding used by
+     * `DexAnnotationNode` end to end.
+     */
+    @Test
+    fun annotationValuesSurviveSmaliToJarRoundTrip(@TempDir tmp: Path) {
+        val smali = """
+            .class public LTarget;
+            .super Ljava/lang/Object;
+            .annotation runtime LMeta;
+                kind = .enum LKind;->B:LKind;
+                names = {
+                    "a",
+                    "b"
+                }
+                nested = .subannotation LNested;
+                    x = 0x1
+                .end subannotation
+                cls = Ljava/lang/String;
+                flag = true
+            .end annotation
+        """.trimIndent()
+
+        val dfn = DexFileNode()
+        Smali.smaliFile("target.smali", smali, dfn)
+        val writer = DexFileWriter()
+        dfn.accept(writer)
+        val dex = writer.toByteArray()
+
+        val out = tmp.resolve("anno.jar")
+        DexEngine.convert(dex, out, opts()) // default BYTECODE validation must pass
+
+        val cn = ClassNode()
+        ClassReader(jarEntry(out, "Target.class")).accept(cn, 0)
+        val ann = cn.visibleAnnotations!!.single { it.desc == "LMeta;" }
+        val values = ann.values.chunked(2).associate { it[0] as String to it[1] }
+
+        // enum values are emitted as an ASM String[]{descriptor, constant-name}
+        @Suppress("UNCHECKED_CAST")
+        val kind = values["kind"] as Array<Any?>
+        assertEquals("LKind;", kind[0])
+        assertEquals("B", kind[1])
+
+        assertEquals(listOf("a", "b"), values["names"] as List<*>)
+
+        val nested = values["nested"] as org.objectweb.asm.tree.AnnotationNode
+        assertEquals("LNested;", nested.desc)
+        assertEquals(1, nested.values.chunked(2).associate { it[0] to it[1] }["x"])
+
+        assertEquals("Ljava/lang/String;", (values["cls"] as org.objectweb.asm.Type).descriptor)
+        assertEquals(true, values["flag"])
     }
 
     // ---------------- limits ----------------

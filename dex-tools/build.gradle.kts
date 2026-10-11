@@ -25,6 +25,10 @@ dependencies {
 
 application {
     mainClass.set("riad.codes.dex2jar.tools.Dex2jarCmd")
+    // JDK 17 inherits the OS locale's default charset (ASCII under a POSIX/C
+    // locale), while JDK 18+ forces UTF-8. Pin UTF-8 so file-name and text
+    // handling behaves the same on every supported JDK. Overridable by the user.
+    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8")
 }
 
 /**
