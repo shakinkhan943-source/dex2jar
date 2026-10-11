@@ -37,12 +37,26 @@ jobs:
           JAR="build/libs/dex2jar-3.0.jar"
           test -s "$JAR"
           echo "Artifact size: $(du -h "$JAR" | cut -f1)"
-          if [ "$(stat -c%s "$JAR")" -gt 8000000 ]; then echo "Jar too large (>8MB)"; unzip -l "$JAR" | awk '{print $4}' | cut -d/ -f1-2 | sort | uniq -c | sort -rn | head -15; exit 1; fi
+          JAR_BYTES="$(stat -c%s "$JAR")"
+          echo "Artifact bytes: $JAR_BYTES"
+          if [ "$JAR_BYTES" -gt 8000000 ]; then
+            echo "Jar too large (>8MB). Largest package counts:"
+            unzip -l "$JAR" | awk 'NF == 4 && $4 !~ /\/$/ {n=split($4,p,"/"); key=(n>1 ? p[1] "/" p[2] : p[1]); count[key]++} END {for (key in count) print count[key], key}' | sort -rn | head -20
+            echo "Largest individual entries:"
+            unzip -l "$JAR" | sort -nr | head -20
+            exit 1
+          fi
           unzip -t "$JAR"
           unzip -p "$JAR" META-INF/MANIFEST.MF | grep -F "Main-Class: riad.codes.dex2jar.tools.Dex2jarCmd"
           jar tf "$JAR" | grep -F "riad/codes/dex2jar/tools/Dex2jarCmd.class"
           jar tf "$JAR" | grep -F "org/objectweb/asm/ClassReader.class"
           jar tf "$JAR" | grep -F "kotlin/Unit.class"
+          jar tf "$JAR" | grep -F "org/antlr/v4/runtime/Parser.class"
+          jar tf "$JAR" | grep -F "org/antlr/runtime/Token.class"
+          if jar tf "$JAR" | grep -Eq '^(com/ibm/icu/|org/antlr/v4/tool/|org/stringtemplate/v4/)'; then
+            echo "JAR contains build-time ANTLR/ICU tooling that must not ship with the CLI"
+            exit 1
+          fi
           if jar tf "$JAR" | grep -E "\\.jar$"; then
             echo "Fat JAR unexpectedly contains nested JAR files"
             exit 1
