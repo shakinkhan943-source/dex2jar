@@ -1,4 +1,16 @@
 jdk:
   - openjdk17
+before_install:
+  # Warm-up pass: JitPack's shared IPs often get HTTP 429 (Too Many Requests)
+  # from Maven Central on the first attempt. Retry until plugin resolution works.
+  - |
+    for i in 1 2 3 4 5; do
+      if ./gradlew --no-daemon -q help; then
+        echo "Gradle classpath resolved OK (attempt $i)"
+        break
+      fi
+      echo "Attempt $i failed (likely 429 rate-limit), sleeping 60s..."
+      sleep 60
+    done
 install:
   - ./gradlew --no-daemon :publishMavenJavaPublicationToMavenLocal -x test
